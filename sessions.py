@@ -1,20 +1,24 @@
+
 import datetime
 import learnlm
 import db
 import discord
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
+import asyncio
+import hashlib
 
 class UserSession:
     """Represents an individual user's session within a tutoring thread."""
-    
+
     def __init__(self, user, thread):
         self.user = user
         self.thread = thread
         self.start_time = datetime.datetime.utcnow()
         self.active = True
-        self.conversation_history = []  # Store user-specific conversation history
+        self.conversation_history = []
         self.last_activity = datetime.datetime.utcnow()
-    
+        self._response_count = 0
+
     def add_to_history(self, message_content: str, response: str):
         """Add message and response to user's conversation history."""
         self.conversation_history.append({
@@ -23,19 +27,39 @@ class UserSession:
             'bot_response': response
         })
         self.last_activity = datetime.datetime.utcnow()
-    
+        self._response_count += 1
+
+        # IMPORTANT: Persist to database for data retention and analytics
+        import db
+        try:
+            # Log to conversations collection (for conversational context)
+            db.add_message(self.user.id, message_content, "user")
+            db.add_message(self.user.id, response, "assistant")
+
+            # Log to messages collection (for discrete message analytics)
+            db.log_message(self.user.id, message_content)
+            db.log_message(self.user.id, response)
+
+            # Update session message count
+            anonymous_user_id = db._get_or_create_anonymous_id(str(self.user.id))
+            db.sessions_collection.update_one(
+                {"anonymous_user_id": anonymous_user_id, "active": True},
+                {"$inc": {"message_count": 1}}
+            )
+        except Exception as e:
+            print(f"Warning: Failed to persist conversation to database: {e}")
+
     def get_context(self) -> str:
         """Get conversation context for this specific user."""
         if not self.conversation_history:
             return ""
-        
-        # Return last few exchanges for context (adjust number as needed)
-        recent_history = self.conversation_history[-5:]  # Last 5 exchanges
+
+        recent_history = self.conversation_history[-5:]
         context = []
         for entry in recent_history:
             context.append(f"User: {entry['user_message']}")
             context.append(f"Assistant: {entry['bot_response']}")
-        
+
         return "\n".join(context)
 
 class TutoringSession:
@@ -45,154 +69,159 @@ class TutoringSession:
         self.thread = thread
         self.start_time = datetime.datetime.utcnow()
         self.active = True
-        self.user_sessions: Dict[int, UserSession] = {}  # user_id -> UserSession
-        self.session_timeout = 1800  # 30 min timeout for inactive users
-    
+        self.user_sessions: Dict[int, UserSession] = {}
+        self.session_timeout = 1800
+        self._session_lock = asyncio.Lock()
+
     def add_user(self, user) -> UserSession:
         """Add a new user to the session or return existing user session."""
         if user.id not in self.user_sessions:
             self.user_sessions[user.id] = UserSession(user, self.thread)
         return self.user_sessions[user.id]
-    
+
     def get_user_session(self, user_id: int) -> Optional[UserSession]:
         """Get user session by user ID."""
         return self.user_sessions.get(user_id)
-    
+
     def remove_inactive_users(self):
         """Remove users who have been inactive for too long."""
         try:
             current_time = datetime.datetime.utcnow()
             inactive_users = []
-            
+
             for user_id, user_session in self.user_sessions.items():
                 try:
-                    # Check if last_activity exists and is valid
                     if hasattr(user_session, 'last_activity') and user_session.last_activity:
                         time_since_activity = (current_time - user_session.last_activity).total_seconds()
                         if time_since_activity > self.session_timeout:
                             inactive_users.append(user_id)
                     else:
-                        # If last_activity is missing, consider user inactive
                         inactive_users.append(user_id)
                 except (AttributeError, TypeError, ValueError) as e:
-                    # If there's any error calculating time, mark user as inactive
                     print(f"Error calculating activity time for user {user_id}: {e}")
                     inactive_users.append(user_id)
-            
-            # Remove inactive users
+
             for user_id in inactive_users:
                 if user_id in self.user_sessions:
                     del self.user_sessions[user_id]
-                    
+
         except Exception as e:
             print(f"Error in remove_inactive_users: {e}")
-            # Continue execution even if cleanup fails
-    
-    async def process_message(self, message):
-        """Processes user input and gets a response from LearnLM with user-specific context."""
+
+
+
+    def prepare_context_for_message(self, message):
+        """Prepare conversation context for AI processing (called from tutor.py)."""
         if not self.active:
-            return await message.channel.send("❌ This session has ended. Start a new one with `/start_session`.")
-        
-        # Clean up inactive users periodically
+            return None
+
+        # User session management
         self.remove_inactive_users()
-        
-        # Get or create user session
         user_session = self.add_user(message.author)
-        
+
         if not user_session.active:
-            return await message.channel.send(f"❌ {message.author.mention}, your individual session has ended. Rejoin with `/join_session`.")
-        
-        # Get user-specific context
+            return None
+
+        # Prepare context
         context = user_session.get_context()
-        
-        # Prepare message with context for LearnLM
         contextual_message = f"User: {message.author.display_name}\n"
         if context:
             contextual_message += f"Previous conversation:\n{context}\n\n"
         contextual_message += f"Current message: {message.content}"
-        
-        # Get response from LearnLM
-        response = learnlm.ask_learnlm(contextual_message)
-        
-        # Add to user's conversation history
-        user_session.add_to_history(message.content, response)
-        
-        # Send response mentioning the user
-        await message.channel.send(f"{message.author.mention}, {response}")
-    
+
+        return {
+            'contextual_message': contextual_message,
+            'user_session': user_session
+        }
+
+    def record_conversation(self, user_session, user_message, bot_response):
+        """Record the conversation in user's history (called from tutor.py)."""
+        user_session.add_to_history(user_message, bot_response)
+
     async def end_user_session(self, user):
-        """Ends a specific user's session."""
+        """End a specific user's session."""
         if user.id in self.user_sessions:
             user_session = self.user_sessions[user.id]
             user_session.active = False
             db.end_session(user.id, self.thread.id)
-            
-            # Remove user from active sessions
             del self.user_sessions[user.id]
-        else:
-            await self.thread.send(f"❌ {user.mention}, you don't have an active session.")
-    
+
     async def end_session(self):
-        """Ends the entire tutoring session for all users."""
-        self.active = False
-        
-        # End all user sessions
-        for user_id, user_session in self.user_sessions.items():
-            user_session.active = False
-            db.end_session(user_id, self.thread.id)
-        
-        # Notify all users
-        user_mentions = [f"<@{user_id}>" for user_id in self.user_sessions.keys()]
-        if user_mentions:
-            mentions_text = ", ".join(user_mentions)
-            await self.thread.send(f"✅ {mentions_text}, the tutoring session has ended. Please provide feedback with `/feedback <1-5>`.")
-        
-        self.user_sessions.clear()
-    
+        """End the entire tutoring session."""
+        async with self._session_lock:
+            self.active = False
+
+            # End all user sessions
+            for user_id, user_session in self.user_sessions.items():
+                user_session.active = False
+                db.end_session(user_id, self.thread.id)
+
+            # Notify users
+            user_mentions = [f"<@{user_id}>" for user_id in self.user_sessions.keys()]
+            if user_mentions:
+                mentions_text = ", ".join(user_mentions)
+                await self.thread.send(f"✅ {mentions_text}, the tutoring session has ended. Please provide feedback with `/feedback <1-5>`.")
+
+            self.user_sessions.clear()
+
     def get_active_users(self) -> list:
         """Get list of active users in the session."""
         return [user_session.user for user_session in self.user_sessions.values() if user_session.active]
-    
+
     def get_session_stats(self) -> dict:
         """Get statistics about the session."""
+        total_responses = sum(us._response_count for us in self.user_sessions.values())
         return {
             'total_users': len(self.user_sessions),
             'active_users': len([us for us in self.user_sessions.values() if us.active]),
             'session_duration': (datetime.datetime.utcnow() - self.start_time).total_seconds(),
+            'total_responses': total_responses,
             'users': [us.user.display_name for us in self.user_sessions.values()]
         }
 
-# Session Management 
 class SessionManager:
     """Manages multiple tutoring sessions across different threads."""
-    
+
     def __init__(self):
-        self.sessions: Dict[int, TutoringSession] = {}  # thread_id -> TutoringSession
-    
+        self.sessions: Dict[int, TutoringSession] = {}
+        self.bot_user_id = None
+
+    def set_bot_user_id(self, bot_user_id: int):
+        """Set the bot's user ID for message filtering."""
+        self.bot_user_id = bot_user_id
+        print(f"DEBUG: Bot user ID set to {bot_user_id}")
+
     def create_session(self, thread) -> TutoringSession:
-        """Create a new tutoring session for a thread."""
+        """Create a new tutoring session."""
+        # Prevent duplicate session creation
+        if thread.id in self.sessions:
+            return self.sessions[thread.id]
+
         session = TutoringSession(thread)
         self.sessions[thread.id] = session
+        print(f"DEBUG: Created session for thread {thread.id}")
         return session
-    
+
     def get_session(self, thread_id: int) -> Optional[TutoringSession]:
         """Get existing session by thread ID."""
         return self.sessions.get(thread_id)
-    
-    def end_session(self, thread_id: int):
+
+    async def end_session(self, thread_id: int):
         """End and remove a session."""
         if thread_id in self.sessions:
+            await self.sessions[thread_id].end_session()
             del self.sessions[thread_id]
-    
+            print(f"DEBUG: Ended session for thread {thread_id}")
+
     def cleanup_inactive_sessions(self):
         """Clean up inactive users across all sessions."""
         try:
-            for session in self.sessions.values():
+            for session in list(self.sessions.values()):
                 if session.active:
                     session.remove_inactive_users()
         except Exception as e:
             print(f"Error in cleanup_inactive_sessions: {e}")
-    
+
     def get_all_sessions_stats(self) -> dict:
         """Get statistics for all active sessions."""
         return {
@@ -235,6 +264,7 @@ async def session_stats_command(slash):
         await slash.send(f"📊 Session Stats:\n"
                         f"• Total users: {stats['total_users']}\n"
                         f"• Active users: {stats['active_users']}\n"
+                        f"• Total responses: {stats['total_responses']}\n"
                         f"• Duration: {stats['session_duration']:.0f} seconds\n"
                         f"• Users: {', '.join(stats['users'])}")
     else:

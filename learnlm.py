@@ -1,7 +1,11 @@
 import os
+import json
+import pickle
+from datetime import datetime, timedelta
+from pathlib import Path
 import google.generativeai as genai
 from dotenv import load_dotenv
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Union
 
 # Load API keys
 load_dotenv()
@@ -57,16 +61,77 @@ TUTOR_SYSTEM_PROMPT = """You are Schrödy, a friendly and supportive tutor with 
 
 Remember and reference previous parts of the conversation when relevant."""
 
-class LearnLMTutor:
-    """A streamlined tutor interface with unified search handling."""
+class ContextMode:
+    """Enum-like class for context modes."""
+    ACTIVE_SESSION = "active_session"
+    FULL_HISTORY = "full_history"
+    SMART_SUMMARY = "smart_summary"
 
-    # Class-level search configuration - shared across all instances
+class SessionManager:
+    """Handles session persistence and context management."""
+
+    def __init__(self, storage_dir: str = "sessions"):
+        self.storage_dir = Path(storage_dir)
+        self.storage_dir.mkdir(exist_ok=True)
+
+    def save_session(self, session_id: str, conversation_history: List[Dict], metadata: Dict = None):
+        """Save session to persistent storage."""
+        session_data = {
+            'conversation_history': conversation_history,
+            'metadata': metadata or {},
+            'last_updated': datetime.now().isoformat(),
+            'total_exchanges': len(conversation_history)
+        }
+
+        session_file = self.storage_dir / f"{session_id}.json"
+        with open(session_file, 'w', encoding='utf-8') as f:
+            json.dump(session_data, f, indent=2, ensure_ascii=False)
+
+    def load_session(self, session_id: str) -> Optional[Dict]:
+        """Load session from persistent storage."""
+        session_file = self.storage_dir / f"{session_id}.json"
+        if not session_file.exists():
+            return None
+
+        try:
+            with open(session_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            return None
+
+    def get_session_info(self, session_id: str) -> Optional[Dict]:
+        """Get session metadata without loading full history."""
+        session_data = self.load_session(session_id)
+        if not session_data:
+            return None
+
+        return {
+            'session_id': session_id,
+            'last_updated': session_data.get('last_updated'),
+            'total_exchanges': session_data.get('total_exchanges', 0),
+            'metadata': session_data.get('metadata', {})
+        }
+
+    def list_sessions(self) -> List[Dict]:
+        """List all available sessions with their info."""
+        sessions = []
+        for session_file in self.storage_dir.glob("*.json"):
+            session_id = session_file.stem
+            info = self.get_session_info(session_id)
+            if info:
+                sessions.append(info)
+
+        # Sort by last updated (most recent first)
+        sessions.sort(key=lambda x: x.get('last_updated', ''), reverse=True)
+        return sessions
+
+class LearnLMTutor:
+    """Enhanced tutor with sophisticated context management."""
+
+    # Class-level search configuration for web search
     SEARCH_CONFIG = {
-        "google_search_retrieval": {
-            "dynamic_retrieval_config": {
-                "mode": "MODE_DYNAMIC",
-                "dynamic_threshold": 0.7
-            }
+        "web_search": {
+            "enable_web_search": True
         }
     }
 
@@ -77,60 +142,213 @@ class LearnLMTutor:
         "trending", "this year", "this month", "recently", "web", "search", "look up"
     ]
 
-    def __init__(self, model_name: str = 'gemini-2.5-flash'):
-        """Initialize the tutor with a specific model."""
+    # Context management settings
+    DEFAULT_ACTIVE_CONTEXT = 5  # exchanges to keep in active session
+    DEFAULT_SUMMARY_CONTEXT = 3  # exchanges for smart summary mode
+    MAX_CONTEXT_TOKENS = 4000  # rough token limit for context
+
+    def __init__(self, model_name: str = 'gemini-2.5-flash', session_id: Optional[str] = None, 
+                 active_context_limit: int = None, storage_dir: str = "sessions"):
+        """
+        Initialize the tutor with enhanced context management.
+
+        Args:
+            model_name: Gemini model to use
+            session_id: Unique session identifier for persistence
+            active_context_limit: Number of recent exchanges to keep in active context
+            storage_dir: Directory to store session files
+        """
         self.model_name = model_name
         self.model = genai.GenerativeModel(model_name)
+        self.session_id = session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.active_context_limit = active_context_limit or self.DEFAULT_ACTIVE_CONTEXT
+
+        # Context management
+        self.context_mode = ContextMode.ACTIVE_SESSION
         self.conversation_history = []
+        self.session_manager = SessionManager(storage_dir)
+
+        # Load existing session if available
+        self._load_existing_session()
+
+    def _load_existing_session(self):
+        """Load existing session data if available."""
+        session_data = self.session_manager.load_session(self.session_id)
+        if session_data:
+            self.conversation_history = session_data.get('conversation_history', [])
+            print(f"📚 Loaded session '{self.session_id}' with {len(self.conversation_history)} previous exchanges")
 
     def _should_search(self, prompt: str) -> bool:
         """Determine if search should be enabled based on prompt content."""
         return any(keyword in prompt.lower() for keyword in self.SEARCH_KEYWORDS)
 
-    def _build_context(self, max_history: int = 3) -> str:
-        """Build conversation context from history."""
+    def _estimate_token_count(self, text: str) -> int:
+        """Rough estimation of token count (4 chars ≈ 1 token)."""
+        return len(text) // 4
+
+    def _build_context_active_session(self) -> str:
+        """Build context using only recent exchanges (active session mode)."""
         if not self.conversation_history:
             return ""
 
-        context = "Previous conversation context:\n"
-        for entry in self.conversation_history[-max_history:]:
+        recent_history = self.conversation_history[-self.active_context_limit:]
+        context = f"Recent conversation context ({len(recent_history)} exchanges):\n"
+
+        for entry in recent_history:
             context += f"Student: {entry['question']}\nTutor: {entry['answer']}\n\n"
+
         return context
+
+    def _build_context_full_history(self) -> str:
+        """Build context using full conversation history with token management."""
+        if not self.conversation_history:
+            return ""
+
+        context = f"Full conversation history ({len(self.conversation_history)} exchanges):\n"
+        current_tokens = 0
+
+        # Start with most recent and work backwards
+        for entry in reversed(self.conversation_history):
+            entry_text = f"Student: {entry['question']}\nTutor: {entry['answer']}\n\n"
+            entry_tokens = self._estimate_token_count(entry_text)
+
+            if current_tokens + entry_tokens > self.MAX_CONTEXT_TOKENS:
+                context += "[Earlier conversation truncated due to length...]\n\n"
+                break
+
+            context = entry_text + context[len("Full conversation history"):]
+            current_tokens += entry_tokens
+
+        return context
+
+    def _build_context_smart_summary(self) -> str:
+        """Build context with recent exchanges + summary of older ones."""
+        if not self.conversation_history:
+            return ""
+
+        # Recent exchanges
+        recent_history = self.conversation_history[-self.DEFAULT_SUMMARY_CONTEXT:]
+        context = f"Recent conversation ({len(recent_history)} exchanges):\n"
+
+        for entry in recent_history:
+            context += f"Student: {entry['question']}\nTutor: {entry['answer']}\n\n"
+
+        # Summary of older exchanges if they exist
+        older_history = self.conversation_history[:-self.DEFAULT_SUMMARY_CONTEXT]
+        if older_history:
+            topics = set()
+            for entry in older_history:
+                # Extract key topics (this is a simple approach - could be enhanced with NLP)
+                question_words = entry['question'].lower().split()
+                topics.update([word for word in question_words if len(word) > 4])
+
+            context += f"Earlier topics covered: {', '.join(list(topics)[:10])}\n\n"
+
+        return context
+
+    def _build_context(self) -> str:
+        """Build context based on current context mode."""
+        if self.context_mode == ContextMode.ACTIVE_SESSION:
+            return self._build_context_active_session()
+        elif self.context_mode == ContextMode.FULL_HISTORY:
+            return self._build_context_full_history()
+        elif self.context_mode == ContextMode.SMART_SUMMARY:
+            return self._build_context_smart_summary()
+        else:
+            return ""
+
+    def set_context_mode(self, mode: str, active_limit: Optional[int] = None) -> str:
+        """
+        Switch context mode.
+
+        Args:
+            mode: One of 'active_session', 'full_history', 'smart_summary'
+            active_limit: For active_session mode, number of exchanges to include
+
+        Returns:
+            Status message
+        """
+        valid_modes = [ContextMode.ACTIVE_SESSION, ContextMode.FULL_HISTORY, ContextMode.SMART_SUMMARY]
+
+        if mode not in valid_modes:
+            return f"❌ Invalid mode. Choose from: {', '.join(valid_modes)}"
+
+        self.context_mode = mode
+
+        if active_limit and mode == ContextMode.ACTIVE_SESSION:
+            self.active_context_limit = active_limit
+
+        mode_descriptions = {
+            ContextMode.ACTIVE_SESSION: f"recent {self.active_context_limit} exchanges only",
+            ContextMode.FULL_HISTORY: "full conversation history (token-limited)",
+            ContextMode.SMART_SUMMARY: "recent exchanges + summary of older topics"
+        }
+
+        return f"✅ Context mode set to **{mode}** ({mode_descriptions[mode]})"
+
+    def get_context_info(self) -> Dict:
+        """Get information about current context settings."""
+        return {
+            'context_mode': self.context_mode,
+            'active_context_limit': self.active_context_limit,
+            'total_exchanges': len(self.conversation_history),
+            'estimated_context_tokens': self._estimate_token_count(self._build_context()),
+            'session_id': self.session_id
+        }
 
     def ask(self, prompt: str, use_search: Optional[bool] = None, remember_context: bool = True) -> str:
         """
-        Ask a question to the tutor.
+        Ask a question to the tutor with enhanced context management.
 
         Args:
             prompt: The student's question
             use_search: Force search on/off. If None, auto-determines based on content
-            remember_context: Whether to remember this exchange in conversation history
+            remember_context: Whether to remember this exchange
         """
         try:
             # Auto-determine search if not specified
             if use_search is None:
                 use_search = self._should_search(prompt)
 
-            # Build context from conversation history
+            # Build context based on current mode
             context = self._build_context() if remember_context else ""
 
             # Build full prompt
             full_prompt = f"{TUTOR_SYSTEM_PROMPT}\n\n{context}Student: {prompt}\n\nTutor:"
 
-            # Generate response with or without grounding
-            tools = [self.SEARCH_CONFIG] if use_search else []
-            response = self.model.generate_content(full_prompt, tools=tools)
+            # Generate response
+            try:
+                if use_search:
+                    # Try with web search tool first
+                    response = self.model.generate_content(
+                        full_prompt,
+                        tools=[{"web_search": {"enable_web_search": True}}]
+                    )
+                else:
+                    response = self.model.generate_content(full_prompt)
+            except Exception as search_error:
+                if any(keyword in str(search_error).lower() for keyword in ["search", "grounding", "not supported", "tool"]):
+                    # Fallback to generation without tools
+                    print(f"Web search not available, falling back to standard generation: {search_error}")
+                    response = self.model.generate_content(full_prompt)
+                else:
+                    raise search_error
 
             if response and response.text:
                 answer = response.text
 
-                # Store in conversation history
+                # Store in conversation history and save session
                 if remember_context:
                     self.conversation_history.append({
                         'question': prompt,
                         'answer': answer,
-                        'used_search': use_search
+                        'used_search': use_search,
+                        'timestamp': datetime.now().isoformat(),
+                        'context_mode': self.context_mode
                     })
+
+                    # Auto-save session
+                    self.save_session()
 
                 return answer
             else:
@@ -138,83 +356,159 @@ class LearnLMTutor:
 
         except Exception as e:
             print(f"Error with Gemini API: {e}")
-            return f"❌ Sorry, I encountered an error while processing your request: {str(e)} Please try again."
+            return f"❌ Sorry, I encountered an error: {str(e)}"
 
-    def ask_with_search(self, prompt: str) -> str:
-        """Ask a question with search explicitly enabled."""
-        return self.ask(prompt, use_search=True)
+    def save_session(self, metadata: Dict = None):
+        """Save current session to persistent storage."""
+        session_metadata = {
+            'context_mode': self.context_mode,
+            'active_context_limit': self.active_context_limit,
+            'model_name': self.model_name
+        }
+        if metadata:
+            session_metadata.update(metadata)
 
-    def ask_without_search(self, prompt: str) -> str:
-        """Ask a question with search explicitly disabled."""
-        return self.ask(prompt, use_search=False)
+        self.session_manager.save_session(self.session_id, self.conversation_history, session_metadata)
+
+    def load_session(self, session_id: str) -> str:
+        """Load a different session."""
+        session_data = self.session_manager.load_session(session_id)
+        if not session_data:
+            return f"❌ Session '{session_id}' not found"
+
+        self.session_id = session_id
+        self.conversation_history = session_data.get('conversation_history', [])
+
+        # Restore session settings
+        metadata = session_data.get('metadata', {})
+        if 'context_mode' in metadata:
+            self.context_mode = metadata['context_mode']
+        if 'active_context_limit' in metadata:
+            self.active_context_limit = metadata['active_context_limit']
+
+        return f"✅ Loaded session '{session_id}' with {len(self.conversation_history)} exchanges"
+
+    def list_sessions(self) -> str:
+        """List all available sessions."""
+        sessions = self.session_manager.list_sessions()
+        if not sessions:
+            return "No saved sessions found."
+
+        result = "📚 **Available Sessions:**\n"
+        for session in sessions[:10]:  # Show max 10 recent sessions
+            last_updated = session.get('last_updated', 'Unknown')
+            if last_updated != 'Unknown':
+                try:
+                    dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+                    last_updated = dt.strftime('%Y-%m-%d %H:%M')
+                except:
+                    pass
+
+            result += f"• **{session['session_id']}** - {session['total_exchanges']} exchanges (Last: {last_updated})\n"
+
+        return result
 
     def clear_history(self):
         """Clear the conversation history."""
         self.conversation_history = []
 
-    def get_history(self) -> List[Dict]:
-        """Get the conversation history."""
-        return self.conversation_history.copy()
+    def get_history_summary(self) -> str:
+        """Get a summary of the conversation history."""
+        if not self.conversation_history:
+            return "No conversation history"
 
-    def list_models(self) -> str:
-        """List all available Gemini models."""
-        try:
-            models = genai.list_models()
-            model_list = []
-            for model in models:
-                model_list.append(f"• **{model.name}** - {model.description}")
-            return "\n".join(model_list) if model_list else "No models available"
-        except Exception as e:
-            return f"❌ Error listing models: {str(e)}"
+        total = len(self.conversation_history)
+        with_search = sum(1 for entry in self.conversation_history if entry.get('used_search', False))
 
-# Convenience functions for backwards compatibility
-def ask_learnlm(prompt: str, search_enabled: bool = False) -> str:
-    """Legacy function wrapper for backwards compatibility."""
-    tutor = LearnLMTutor()
-    return tutor.ask(prompt, use_search=search_enabled, remember_context=False)
+        # Get topic distribution (simple word frequency)
+        all_questions = ' '.join([entry['question'] for entry in self.conversation_history])
+        words = [word.lower() for word in all_questions.split() if len(word) > 4]
+        word_freq = {}
+        for word in words:
+            word_freq[word] = word_freq.get(word, 0) + 1
 
-def ask_learnlm_with_search(prompt: str) -> str:
-    """Legacy function wrapper with search enabled."""
-    tutor = LearnLMTutor()
-    return tutor.ask_with_search(prompt)
+        top_topics = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:5]
 
-def ask_learnlm_auto_search(prompt: str) -> str:
-    """Legacy function wrapper with auto search detection."""
-    tutor = LearnLMTutor()
-    return tutor.ask(prompt, remember_context=False)
+        summary = f"📊 **Session Summary:**\n"
+        summary += f"• Total exchanges: {total}\n"
+        summary += f"• Searches used: {with_search}\n"
+        summary += f"• Current context mode: {self.context_mode}\n"
+        summary += f"• Top topics: {', '.join([topic[0] for topic in top_topics])}\n"
+
+        return summary
+
+    # Convenience methods
+    def ask_with_search(self, prompt: str) -> str:
+        """Ask with search explicitly enabled."""
+        return self.ask(prompt, use_search=True)
+
+    def ask_without_search(self, prompt: str) -> str:
+        """Ask with search explicitly disabled."""
+        return self.ask(prompt, use_search=False)
 
 # Demo function
-def demo_math_formatting():
-    """Demonstrate proper Unicode math formatting."""
-    examples = [
-        "Quadratic formula: x = (-b ± √(b² - 4ac)) / 2a",
-        "Pythagorean theorem: a² + b² = c²",
-        "Euler's identity: e^(iπ) + 1 = 0",
-        "Integration: ∫₀^∞ e^(-x²) dx = √π/2",
-        "Summation: Σₙ₌₁^∞ 1/n² = π²/6"
+def demo_context_management():
+    """Demonstrate the enhanced context management features."""
+    print("🎓 Enhanced LearnLM Context Management Demo")
+    print("=" * 50)
+
+    # Create tutor instance
+    tutor = LearnLMTutor(session_id="demo_session")
+
+    # Simulate some conversation
+    questions = [
+        "What is calculus?",
+        "Can you explain derivatives?",
+        "How do I find the derivative of x²?",
+        "What about the chain rule?",
+        "Can you give me practice problems?"
     ]
 
-    print("Math formatting examples:")
-    for example in examples:
-        print(f"✓ {example}")
+    print("Simulating conversation...")
+    for i, question in enumerate(questions):
+        print(f"\nQ{i+1}: {question}")
+        # For demo, we'll just store mock responses
+        mock_answer = f"This is a mock answer to question {i+1} about {question.lower()}"
+        tutor.conversation_history.append({
+            'question': question,
+            'answer': mock_answer,
+            'used_search': False,
+            'timestamp': datetime.now().isoformat(),
+            'context_mode': tutor.context_mode
+        })
+
+    print(f"\n📚 Conversation history: {len(tutor.conversation_history)} exchanges")
+
+    # Demo different context modes
+    print("\n🔄 Testing different context modes:")
+
+    modes = [
+        (ContextMode.ACTIVE_SESSION, 3),
+        (ContextMode.SMART_SUMMARY, None),
+        (ContextMode.FULL_HISTORY, None)
+    ]
+
+    for mode, limit in modes:
+        if limit:
+            result = tutor.set_context_mode(mode, limit)
+        else:
+            result = tutor.set_context_mode(mode)
+        print(f"• {result}")
+
+        context = tutor._build_context()
+        token_count = tutor._estimate_token_count(context)
+        print(f"  Context length: ~{token_count} tokens")
+
+    # Demo session management
+    print(f"\n💾 Saving session...")
+    tutor.save_session()
+
+    print(f"📋 Session info:")
+    info = tutor.get_context_info()
+    for key, value in info.items():
+        print(f"  {key}: {value}")
+
+    print(f"\n📖 {tutor.get_history_summary()}")
 
 if __name__ == "__main__":
-    # Demo the math formatting
-    demo_math_formatting()
-
-    # Example with streamlined interface
-    print("\n" + "="*50)
-    print("Example with streamlined interface:")
-    tutor = LearnLMTutor()
-
-    # Auto-search detection
-    result = tutor.ask("What are the latest developments in quantum computing in 2025?")
-    print("Auto-search result:", result[:100] + "..." if len(result) > 100 else result)
-
-    # Explicit search control
-    result = tutor.ask_with_search("Current trends in AI education")
-    print("Explicit search result:", result[:100] + "..." if len(result) > 100 else result)
-
-    # No search
-    result = tutor.ask_without_search("Explain the quadratic formula")
-    print("No search result:", result[:100] + "..." if len(result) > 100 else result)
+    demo_context_management()
