@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 import db
 import datetime
-from learnlm import ask_learnlm
+from learnlm import LearnLMTutor
 from sessions import session_manager 
 
 class Tutor(commands.Cog):
