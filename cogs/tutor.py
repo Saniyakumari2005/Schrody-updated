@@ -267,6 +267,7 @@ class Tutor(commands.Cog):
         """Resume an existing tutoring session (both active and ended sessions)."""
         user = interaction.user
         user_id = str(user.id)
+        interaction_acknowledged = False
 
         try:
             # Check if user has an active session first
@@ -330,6 +331,7 @@ class Tutor(commands.Cog):
                         f"✅ {user.mention}, your session has been resumed in this thread!", 
                         ephemeral=True
                     )
+                    interaction_acknowledged = True
 
                     # Create styled embed for session resume
                     embed = discord.Embed(
@@ -380,10 +382,12 @@ class Tutor(commands.Cog):
                                 }}
                             )
 
-                            await interaction.response.send_message(
-                                f"✅ {user.mention}, your session has been resumed in {thread.mention}!", 
-                                ephemeral=True
-                            )
+                            if not interaction_acknowledged:
+                                await interaction.response.send_message(
+                                    f"✅ {user.mention}, your session has been resumed in {thread.mention}!", 
+                                    ephemeral=True
+                                )
+                                interaction_acknowledged = True
 
                             # Create styled embed for session resume
                             embed = discord.Embed(
@@ -409,7 +413,7 @@ class Tutor(commands.Cog):
                             continue
 
                 # If not found in active threads, check archived threads
-                if not thread_found:
+                if not thread_found and not interaction_acknowledged:
                     async for thread in guild.archived_threads(limit=100):
                         if thread.name == thread_name:
                             try:
@@ -439,6 +443,7 @@ class Tutor(commands.Cog):
                                     f"✅ {user.mention}, your session has been resumed in {thread.mention}!", 
                                     ephemeral=True
                                 )
+                                interaction_acknowledged = True
 
                                 # Create styled embed for session resume from archive
                                 embed = discord.Embed(
@@ -466,7 +471,7 @@ class Tutor(commands.Cog):
                                 print(f"Error unarchiving thread: {e}")
                                 continue
 
-            if not thread_found:
+            if not thread_found and not interaction_acknowledged:
                 # Create a new thread since the old one wasn't found
                 user_display_name = self.get_user_display_name(user, interaction.guild)
 
@@ -495,6 +500,7 @@ class Tutor(commands.Cog):
                     f"✅ {user.mention}, your session has been resumed in a new thread since the previous one wasn't found!", 
                     ephemeral=True
                 )
+                interaction_acknowledged = True
 
                 # Create styled embed for session resume in new thread
                 embed = discord.Embed(
@@ -522,7 +528,7 @@ class Tutor(commands.Cog):
 
         except Exception as e:
             print(f"Error in resume_session: {e}")
-            if not interaction.response.is_done():
+            if not interaction_acknowledged and not interaction.response.is_done():
                 await interaction.response.send_message(
                     f"❌ {user.mention}, an error occurred while resuming your session. Please try again or start a new session.", 
                     ephemeral=True
