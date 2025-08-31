@@ -12,12 +12,19 @@ class Feedback(commands.Cog):
     @app_commands.command(name="feedback", description="Submit feedback (1-5).")
     async def feedback(self, interaction: discord.Interaction, rating: int):
         """Logs user feedback."""
-        if rating < 1 or rating > 5:
-            await interaction.response.send_message("❌ Please provide a rating between 1 and 5.")
-            return
+        try:
+            if rating < 1 or rating > 5:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ Please provide a rating between 1 and 5.")
+                return
 
-        db.log_feedback(interaction.user.id, rating)
-        await interaction.response.send_message("✅ Thanks for your feedback!")
+            db.log_feedback(interaction.user.id, rating)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("✅ Thanks for your feedback!")
+        except Exception as e:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Error processing feedback. Please try again.")
+            print(f"Error in feedback command: {e}")
 
     @app_commands.command(name="pending_feedback", description="List users who haven't given feedback.")
     async def pending_feedback(self, interaction: discord.Interaction):
@@ -26,7 +33,7 @@ class Feedback(commands.Cog):
         if len(list(pending_users)) == 0:
             await interaction.response.send_message("✅ Everyone has submitted feedback!")
             return
-        
+
         user_list = "\n".join([user["username"] for user in pending_users])
         await interaction.response.send_message(f"🚨 Users who haven't submitted feedback:\n```{user_list}```")
 
@@ -39,7 +46,7 @@ class Feedback(commands.Cog):
                 try:
                     user = await self.bot.fetch_user(int(session["user_id"]))
                     await user.send("🔔 Reminder: Schrödy is waiting for your feedback! Please use `/feedback <1-5>`.")
-                    
+
                     # Mark that we've sent a reminder for this session
                     db.sessions_collection.update_one(
                         {"_id": session["_id"]}, 
