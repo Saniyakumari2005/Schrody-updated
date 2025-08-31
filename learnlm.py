@@ -75,28 +75,67 @@ class SessionManager:
         self.storage_dir.mkdir(exist_ok=True)
 
     def save_session(self, session_id: str, conversation_history: List[Dict], metadata: Dict = None):
-        """Save session to persistent storage."""
-        session_data = {
-            'conversation_history': conversation_history,
-            'metadata': metadata or {},
-            'last_updated': datetime.now().isoformat(),
-            'total_exchanges': len(conversation_history)
-        }
+        """Save session to persistent storage with error handling."""
+        try:
+            session_data = {
+                'conversation_history': conversation_history,
+                'metadata': metadata or {},
+                'last_updated': datetime.now().isoformat(),
+                'total_exchanges': len(conversation_history)
+            }
 
-        session_file = self.storage_dir / f"{session_id}.json"
-        with open(session_file, 'w', encoding='utf-8') as f:
-            json.dump(session_data, f, indent=2, ensure_ascii=False)
+            session_file = self.storage_dir / f"{session_id}.json"
+            
+            # Create a temporary file first to avoid corruption
+            temp_file = session_file.with_suffix('.tmp')
+            
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, indent=2, ensure_ascii=False)
+            
+            # Atomically replace the original file
+            temp_file.replace(session_file)
+            
+            print(f"✅ Session '{session_id}' saved successfully to {session_file}")
+            
+        except PermissionError as e:
+            print(f"❌ Permission denied when saving session '{session_id}': {e}")
+            raise
+        except OSError as e:
+            print(f"❌ OS error when saving session '{session_id}': {e}")
+            raise
+        except json.JSONEncodeError as e:
+            print(f"❌ JSON encoding error when saving session '{session_id}': {e}")
+            raise
+        except Exception as e:
+            print(f"❌ Unexpected error when saving session '{session_id}': {e}")
+            raise
 
     def load_session(self, session_id: str) -> Optional[Dict]:
-        """Load session from persistent storage."""
+        """Load session from persistent storage with error handling."""
         session_file = self.storage_dir / f"{session_id}.json"
+        
         if not session_file.exists():
+            print(f"📁 Session file '{session_id}.json' not found")
             return None
 
         try:
             with open(session_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
+                session_data = json.load(f)
+                print(f"✅ Session '{session_id}' loaded successfully")
+                return session_data
+                
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON decode error when loading session '{session_id}': {e}")
+            print(f"💡 Session file may be corrupted: {session_file}")
+            return None
+        except PermissionError as e:
+            print(f"❌ Permission denied when loading session '{session_id}': {e}")
+            return None
+        except OSError as e:
+            print(f"❌ OS error when loading session '{session_id}': {e}")
+            return None
+        except Exception as e:
+            print(f"❌ Unexpected error when loading session '{session_id}': {e}")
             return None
 
     def get_session_info(self, session_id: str) -> Optional[Dict]:
@@ -359,16 +398,24 @@ class LearnLMTutor:
             return f"❌ Sorry, I encountered an error: {str(e)}"
 
     def save_session(self, metadata: Dict = None):
-        """Save current session to persistent storage."""
-        session_metadata = {
-            'context_mode': self.context_mode,
-            'active_context_limit': self.active_context_limit,
-            'model_name': self.model_name
-        }
-        if metadata:
-            session_metadata.update(metadata)
+        """Save current session to persistent storage with error handling."""
+        try:
+            session_metadata = {
+                'context_mode': self.context_mode,
+                'active_context_limit': self.active_context_limit,
+                'model_name': self.model_name
+            }
+            if metadata:
+                session_metadata.update(metadata)
 
-        self.session_manager.save_session(self.session_id, self.conversation_history, session_metadata)
+            self.session_manager.save_session(self.session_id, self.conversation_history, session_metadata)
+            
+        except Exception as e:
+            print(f"❌ Failed to save session '{self.session_id}': {e}")
+            # Don't re-raise to avoid breaking the conversation flow
+            return False
+        
+        return True
 
     def load_session(self, session_id: str) -> str:
         """Load a different session."""

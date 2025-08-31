@@ -594,12 +594,18 @@ class Tutor(commands.Cog):
                     session.record_conversation(context_data['user_session'], message.content, response)
 
                     # ALSO save to JSON file using LearnLM tutor
-                    tutor.save_session({
-                        'user_id': str(message.author.id),
-                        'username': message.author.display_name,
-                        'thread_id': str(message.channel.id),
-                        'timestamp': datetime.datetime.utcnow().isoformat()
-                    })
+                    try:
+                        json_save_success = tutor.save_session({
+                            'user_id': str(message.author.id),
+                            'username': message.author.display_name,
+                            'thread_id': str(message.channel.id),
+                            'timestamp': datetime.datetime.utcnow().isoformat()
+                        })
+                        if not json_save_success:
+                            print(f"Warning: JSON session save failed for thread {message.channel.id}")
+                    except Exception as json_error:
+                        print(f"Warning: JSON session save error for thread {message.channel.id}: {json_error}")
+                        # Continue execution - database save already succeeded
 
                 except Exception as e:
                     print(f"Error getting AI response: {e}")
