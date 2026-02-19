@@ -9,3 +9,6 @@ packages = ["glibcLocales"]
 run = ["sh", "-c", "python3 bot.py"]
 deploymentTarget = "gce"
 ignorePorts = true
+
+[agent]
+expertMode = true

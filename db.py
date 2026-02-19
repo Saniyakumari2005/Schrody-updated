@@ -158,6 +158,8 @@ def add_user(discord_id, username):
                 "last_seen": datetime.datetime.utcnow(),
                 "user_role": "student",  # Default role
                 "privacy_compliant": True,
+                "consent": None,            
+                "consent_timestamp": None,
                 "preferences": {
                     "notifications": True,
                     "privacy_level": "standard"
@@ -607,6 +609,7 @@ def _initialize_indexes():
         users_collection.create_index("anonymous_id", unique=True)
         users_collection.create_index("username_hash")
         users_collection.create_index("last_seen")
+        users_collection.create_index("consent") 
 
         # Session indexes (anonymous IDs only)
         sessions_collection.create_index([("anonymous_user_id", 1), ("active", 1)])

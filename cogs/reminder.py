@@ -96,7 +96,7 @@ class Reminders(commands.Cog):
             )
         except Exception as e:
             print(f"Failed to send reminder to {task['discord_id']}: {e}")
-
+#build the command
     @app_commands.command(name="reminders", description="List all your upcoming task deadlines.")
     async def reminders(self, interaction: discord.Interaction):
         """Show upcoming reminders for the user who runs the command."""
@@ -113,7 +113,7 @@ class Reminders(commands.Cog):
         if user_tasks.empty:
             await interaction.followup.send("You have no upcoming deadlines.", ephemeral=True)
             return
-
+#show your upcoming deadlines
         embed = discord.Embed(title="Your Upcoming Deadlines", color=discord.Color.green())
         tz = pytz.timezone("US/Pacific") #Change to your timezone
         now = datetime.now(tz)

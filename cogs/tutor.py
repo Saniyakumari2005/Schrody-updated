@@ -7,11 +7,29 @@ from learnlm import LearnLMTutor
 from sessions import session_manager
 import asyncio
 
+class ConsentView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+        self.consent = None
+
+    @discord.ui.button(label="Yes, I Agree", style=discord.ButtonStyle.success)
+    async def agree(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.consent = True
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="No, I Decline", style=discord.ButtonStyle.danger)
+    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.consent = False
+        self.stop()
+        await interaction.response.defer()
+
 class Tutor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.guest_participation_asked = set()
         self.check_inactive_sessions.start()
+        self.private_thread_channels = set()  # Channels that should create private threads
 
         # Message deduplication - prevents Discord from sending same message twice
         self._message_processing_cache = {}  # {message_id: timestamp}
@@ -41,7 +59,7 @@ class Tutor(commands.Cog):
         return user.display_name
 
     async def find_or_create_user_thread(self, interaction, user_display_name):
-        """Find existing thread for user or create a new one."""
+        """Find existing thread for user or create a new one with appropriate privacy settings."""
         guild = interaction.guild
         thread_name = f"Schrödy-{user_display_name}"
 
@@ -64,22 +82,30 @@ class Tutor(commands.Cog):
                         print(f"Error unarchiving thread: {e}")
                         continue
         except AttributeError:
-            # Handle case where archived_threads method doesn't exist or has different signature
             print(f"Warning: archived_threads method not available or different signature")
         except Exception as e:
             print(f"Error accessing archived threads: {e}")
+
+        # Determine thread type based on channel configuration
+        channel_id = interaction.channel.id
+        if isinstance(interaction.channel, discord.Thread):
+            channel_id = interaction.channel.parent.id
+
+        # Check if this channel is configured for private threads
+        is_private = channel_id in self.private_thread_channels
+        thread_type = discord.ChannelType.private_thread if is_private else discord.ChannelType.public_thread
 
         # Create new thread if none found
         if isinstance(interaction.channel, discord.Thread):
             parent_channel = interaction.channel.parent
             thread = await parent_channel.create_thread(
                 name=thread_name, 
-                type=discord.ChannelType.public_thread
+                type=thread_type
             )
         else:
             thread = await interaction.channel.create_thread(
                 name=thread_name, 
-                type=discord.ChannelType.public_thread
+                type=thread_type
             )
 
         return thread
@@ -102,7 +128,53 @@ class Tutor(commands.Cog):
                 ephemeral=True
             )
             return
+            
+        # Consent Check
+        anonymous_user_id_check = db._get_or_create_anonymous_id(str(interaction.user.id), interaction.user.name)
+        existing_user_consent = db.users_collection.find_one({"anonymous_id": anonymous_user_id_check})
 
+        if not existing_user_consent or existing_user_consent.get("consent") is None:
+            consent_embed = discord.Embed(
+                title="📋 Terms & Conditions",
+                description=(
+                    "Before using this tutoring bot, please read and accept our [Terms & Conditions](https://drive.google.com/file/d/1yQUrUAg1JUoYnhCDBFEY78j6jIIGWACm/view?usp=sharing).\n\n"
+                    "**By clicking Yes, you agree to:**\n"
+                    "- Your messages being stored for session continuity\n"
+                    "- Anonymous usage data being collected for improvement\n"
+                    "- Abiding by the server's rules during tutoring sessions\n\n"
+                    "**If you decline, you will not be able to use the bot.**"
+                ),
+                color=discord.Color.blurple()
+            )
+            view = ConsentView()
+            await interaction.response.send_message(embed=consent_embed, view=view, ephemeral=True)
+            await view.wait()
+
+            if view.consent is True:
+                db.users_collection.update_one(
+                    {"anonymous_user_id": anonymous_user_id_check},
+                    {"$set": {"consent": True, "consent_timestamp": datetime.datetime.utcnow()}},
+                    upsert=True
+                )
+            else:
+                db.users_collection.update_one(
+                    {"anonymous_id": anonymous_user_id_check},
+                    {"$set": {"consent": False, "consent_timestamp": datetime.datetime.utcnow()}},
+                    upsert=True
+                )
+                await interaction.followup.send(
+                    "❌ You declined the Terms & Conditions. You cannot use the tutoring bot.",
+                    ephemeral=True
+                )
+                return
+        elif existing_user_consent.get("consent") is False:
+            await interaction.response.send_message(
+                "❌ You have previously declined the Terms & Conditions. You cannot use the tutoring bot.",
+                ephemeral=True
+            )
+            return
+        # End Consent Check
+        
         user = interaction.user
         user_display_name = self.get_user_display_name(user, interaction.guild)
         # Get anonymous user ID for database operations
@@ -463,6 +535,56 @@ class Tutor(commands.Cog):
             except:
                 pass
 
+    @app_commands.command(name="toggle_private_threads", description="Toggle private thread creation for this channel")
+    @app_commands.default_permissions(administrator=True)
+    async def toggle_private_threads(self, interaction: discord.Interaction):
+        """Toggle whether this channel creates private or public threads."""
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ This command is restricted to administrators only.", ephemeral=True)
+            return
+
+        channel_id = interaction.channel.id
+
+        if channel_id in self.private_thread_channels:
+            # Currently set to private, switch to public
+            self.private_thread_channels.remove(channel_id)
+            new_type = "**public**"
+            emoji = "🌐"
+        else:
+            # Currently public (or default), switch to private  
+            self.private_thread_channels.add(channel_id)
+            new_type = "**private**"
+            emoji = "🔒"
+
+        await interaction.response.send_message(
+            f"{emoji} {interaction.channel.mention} will now create {new_type} threads for tutoring sessions.",
+            ephemeral=True
+        )
+
+    @app_commands.command(name="thread_status", description="Check if this channel creates private or public threads")
+    @app_commands.default_permissions(administrator=True) 
+    async def thread_status(self, interaction: discord.Interaction):
+        """Check the current thread creation setting for this channel."""
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ This command is restricted to administrators only.", ephemeral=True)
+            return
+
+        channel_id = interaction.channel.id
+
+        if channel_id in self.private_thread_channels:
+            status = "🔒 **Private threads**"
+            description = "Only thread participants can see the conversation"
+        else:
+            status = "🌐 **Public threads** (default)"
+            description = "All server members can see the threads"
+
+        embed = discord.Embed(
+            title=f"Thread Setting for {interaction.channel.name}",
+            description=f"{status}\n\n{description}",
+            color=discord.Color.blue()
+        )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
     @commands.Cog.listener()
     async def on_message(self, message):
         """Listen for messages in tutoring threads with comprehensive duplicate prevention."""
@@ -610,7 +732,7 @@ class Tutor(commands.Cog):
                 except Exception as e:
                     print(f"Error getting AI response: {e}")
                     try:
-                        await message.channel.send(f"❌ {message.author.mention}, I encountered an error processing your message. Please try again.")
+                        await message.channel.send(f"❌ {message.author.mention}, I encountered an error processing your message.The API servers seem busy at the moment. Please try again after some time.")
                     except discord.HTTPException:
                         pass
                     return
@@ -663,7 +785,35 @@ class Tutor(commands.Cog):
                         db.end_session_by_anonymous_id(anonymous_user_id)
                         # Note: Cannot send DM with anonymous ID for privacy
                         print(f"Session {session_id} ended due to inactivity (30 minutes)")
-
+                        
+                    # 15 minutes - second reminder
+                    elif time_since_activity >= datetime.timedelta(minutes=15) and not session.get("second_reminder_sent", False):
+                        for thread_id, tutoring_session in session_manager.sessions.items():
+                            try:
+                                embed = discord.Embed(
+                                    title="⚠️ Session Closing Soon",
+                                    description="You've been inactive for 15 minutes.",
+                                    color=discord.Color.orange()
+                                )
+                                embed.add_field(
+                                    name="⏰ Session will close in:",
+                                    value="15 minutes if no activity is detected",
+                                    inline=False
+                                )
+                                embed.add_field(
+                                    name="💬 To continue:",
+                                    value="Just send any message or question to keep your session active!",
+                                    inline=False
+                                )
+                                await tutoring_session.thread.send(embed=embed)
+                                db.sessions_collection.update_one(
+                                    {"anonymous_user_id": anonymous_user_id, "active": True},
+                                    {"$set": {"second_reminder_sent": True}}
+                                )
+                                break
+                            except discord.NotFound:
+                                pass
+                                
                     # 5 minutes - send thread reminder (only if not already sent)
                     elif time_since_activity >= datetime.timedelta(minutes=5) and not session.get("thread_reminder_sent", False):
                         # Find the thread through session manager by thread hash
@@ -719,7 +869,7 @@ class Tutor(commands.Cog):
         if self.bot.user:
             session_manager.set_bot_user_id(self.bot.user.id)
 
-    def cog_unload(self):
+    async def cog_unload(self):
         """Clean up when the cog is unloaded."""
         self.check_inactive_sessions.cancel()
         self.guest_participation_asked.clear()
