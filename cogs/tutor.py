@@ -203,7 +203,8 @@ class Tutor(commands.Cog):
                     {"$set": {
                         "last_activity": datetime.datetime.utcnow(),
                         "dm_warning_sent": False,
-                        "thread_reminder_sent": False
+                        "thread_reminder_sent": False,
+                        "second_reminder_sent": False
                     }}
                 )
 
@@ -410,7 +411,8 @@ class Tutor(commands.Cog):
                         "active": True,
                         "last_activity": datetime.datetime.utcnow(),
                         "dm_warning_sent": False,
-                        "thread_reminder_sent": False
+                        "thread_reminder_sent": False,
+                        "second_reminder_sent": False
                     }}
                 )
 
@@ -427,7 +429,8 @@ class Tutor(commands.Cog):
                 {"$set": {
                     "last_activity": datetime.datetime.utcnow(),
                     "dm_warning_sent": False,
-                    "thread_reminder_sent": False
+                    "thread_reminder_sent": False,
+                    "second_reminder_sent": False
                 }}
             )
 
@@ -592,8 +595,7 @@ class Tutor(commands.Cog):
         # IMMEDIATE: Complete bot detection (must be first)
         if (message.author.bot or 
             (hasattr(self.bot, 'user') and self.bot.user and message.author.id == self.bot.user.id) or
-            message.author.name in ['Schrödy', 'Schrödy#5061'] or
-            str(message.author) in ['Schrödy#5061', 'Schrödy'] or
+           
             message.webhook_id is not None):
             return
 
@@ -634,27 +636,38 @@ class Tutor(commands.Cog):
             anonymous_user_id = db._get_or_create_anonymous_id(user_id, str(message.author))
             existing_session = db.sessions_collection.find_one({"anonymous_user_id": anonymous_user_id, "active": True})
 
-            # Ask about participation if not already asked and user doesn't have active session
-            if not existing_session and user_int_id not in self.guest_participation_asked:
-                self.guest_participation_asked.add(user_int_id)
-
-                embed = discord.Embed(
-                    title="🤝 Join Session as Guest?",
-                    description=f"{message.author.mention}, you're participating in another user's tutoring session as a guest.",
-                    color=discord.Color.blue()
-                )
-                embed.add_field(
-                    name="As a guest, you will:",
-                    value="• Be able to ask questions and get responses\n• Have your conversation saved for context\n• Get suggestions to start your own session for personalized help",
-                    inline=False
-                )
-                embed.add_field(
-                    name="Note:",
-                    value="Use `/start_session` to access your own personal tutoring thread.",
-                    inline=False
+            
+            # Register user in DB if they don't have an active session (guest)
+            if not existing_session:
+                # Register them as a participant in the thread's session
+                db.start_session(message.author.id, message.author.name, message.channel.id)
+                existing_session = db.sessions_collection.find_one(
+                    {"anonymous_user_id": anonymous_user_id, "active": True}
                 )
 
-                await message.channel.send(embed=embed, delete_after=10)
+                if user_int_id not in self.guest_participation_asked:
+                    self.guest_participation_asked.add(user_int_id)
+                    embed = discord.Embed(
+                        title="🤝 Welcome to the Session!",
+                        description=f"{message.author.mention}, you've joined this tutoring session as a participant.",
+                        color=discord.Color.blue()
+                    )
+                    embed.add_field(
+                        name="You can:",
+                        value="• Ask questions and contribute to the shared conversation\n• See everyone's questions and the bot's answers\n• Use `/start_session` for your own private thread",
+                        inline=False
+                    )
+                    await message.channel.send(embed=embed, delete_after=15)
+
+            # Update last activity for this user's session
+            db.sessions_collection.update_one(
+                {"anonymous_user_id": anonymous_user_id, "active": True},
+                {"$set": {
+                    "last_activity": datetime.datetime.utcnow(),
+                    "thread_reminder_sent": False,
+                    "second_reminder_sent": False
+                }}
+            )
 
             # Update last activity time for any active session
             if existing_session:
@@ -663,7 +676,8 @@ class Tutor(commands.Cog):
                     {"$set": {
                         "last_activity": datetime.datetime.utcnow(),
                         "dm_warning_sent": False,
-                        "thread_reminder_sent": False
+                        "thread_reminder_sent": False,
+                        "second_reminder_sent": False
                     }}
                 )
 
@@ -817,34 +831,34 @@ class Tutor(commands.Cog):
                     # 5 minutes - send thread reminder (only if not already sent)
                     elif time_since_activity >= datetime.timedelta(minutes=5) and not session.get("thread_reminder_sent", False):
                         # Find the thread through session manager by thread hash
-                        thread_hash = session.get("thread_hash")
-                        if thread_hash:
+                        thread_id = session.get("thread_id")
+                        tutoring_session = session_manager.get_session(thread_id) if thread_id else None
+                        if tutoring_session:
                             # Find matching thread in session manager
-                            for thread_id, tutoring_session in session_manager.sessions.items():
-                                try:
-                                    embed = discord.Embed(
-                                        title="💤 Are you still there?",
-                                        description="You've been inactive for 5 minutes.",
-                                        color=discord.Color.yellow()
-                                    )
-                                    embed.add_field(
-                                        name="⏰ Session will close in:",
-                                        value="25 minutes if no activity is detected",
-                                        inline=False
-                                    )
-                                    embed.add_field(
-                                        name="💬 To continue:",
-                                        value="Just send any message or question to keep your session active!",
-                                        inline=False
-                                    )
-                                    await tutoring_session.thread.send(embed=embed)
-                                    db.sessions_collection.update_one(
-                                        {"anonymous_user_id": anonymous_user_id, "active": True},
-                                        {"$set": {"thread_reminder_sent": True}}
-                                    )
-                                    break
-                                except discord.NotFound:
-                                    pass
+                            
+                            try:
+                                embed = discord.Embed(
+                                    title="💤 Are you still there?",
+                                    description="You've been inactive for 5 minutes.",
+                                    color=discord.Color.yellow()
+                                )
+                                embed.add_field(
+                                    name="⏰ Session will close in:",
+                                    value="25 minutes if no activity is detected",
+                                    inline=False
+                                )
+                                embed.add_field(
+                                    name="💬 To continue:",
+                                    value="Just send any message or question to keep your session active!",
+                                    inline=False
+                                )
+                                await tutoring_session.thread.send(embed=embed)
+                                db.sessions_collection.update_one(
+                                    {"anonymous_user_id": anonymous_user_id, "active": True},
+                                    {"$set": {"thread_reminder_sent": True}}
+                                )
+                                break
+                            
                         else:
                             # Mark as reminded even if thread not found to prevent spam
                             db.sessions_collection.update_one(

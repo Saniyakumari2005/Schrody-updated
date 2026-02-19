@@ -29,26 +29,22 @@ class UserSession:
         self.last_activity = datetime.datetime.utcnow()
         self._response_count += 1
 
-        # IMPORTANT: Persist to database for data retention and analytics
-        import db
         try:
-            # Log to conversations collection (for conversational context)
-            db.add_message(self.user.id, message_content, "user")
-            db.add_message(self.user.id, response, "assistant")
+            anonymous_user_id = db._get_or_create_anonymous_id(str(self.user.id), self.user.name)
+            db.add_message(anonymous_user_id, message_content, "user")
+            db.add_message(anonymous_user_id, response, "assistant")
+            db.log_message(anonymous_user_id, message_content)
+            db.log_message(anonymous_user_id, response)
 
-            # Log to messages collection (for discrete message analytics)
-            db.log_message(self.user.id, message_content)
-            db.log_message(self.user.id, response)
-
-            # Update session message count
-            anonymous_user_id = db._get_or_create_anonymous_id(str(self.user.id))
-            db.sessions_collection.update_one(
+            result = db.sessions_collection.update_one(
                 {"anonymous_user_id": anonymous_user_id, "active": True},
                 {"$inc": {"message_count": 1}}
             )
+            if result.matched_count == 0:
+                print(f"Note: No active DB session for {anonymous_user_id} (guest participant)")
         except Exception as e:
             print(f"Warning: Failed to persist conversation to database: {e}")
-
+            
     def get_context(self) -> str:
         """Get conversation context for this specific user."""
         if not self.conversation_history:
@@ -72,6 +68,7 @@ class TutoringSession:
         self.user_sessions: Dict[int, UserSession] = {}
         self.session_timeout = 1800
         self._session_lock = asyncio.Lock()
+        self.shared_history = []
 
     def add_user(self, user) -> UserSession:
         """Add a new user to the session or return existing user session."""
@@ -111,23 +108,33 @@ class TutoringSession:
 
 
     def prepare_context_for_message(self, message):
-        """Prepare conversation context for AI processing (called from tutor.py)."""
+        """Prepare shared conversation context for AI processing."""
         if not self.active:
             return None
 
-        # User session management
         self.remove_inactive_users()
         user_session = self.add_user(message.author)
 
         if not user_session.active:
             return None
 
-        # Prepare context
-        context = user_session.get_context()
-        contextual_message = f"User: {message.author.display_name}\n"
-        if context:
-            contextual_message += f"Previous conversation:\n{context}\n\n"
-        contextual_message += f"Current message: {message.content}"
+        # Build context from shared thread history (last 10 exchanges)
+        recent = self.shared_history[-10:]
+        context_lines = []
+        for entry in recent:
+            context_lines.append(f"{entry['username']}: {entry['user_message']}")
+            context_lines.append(f"Assistant: {entry['bot_response']}")
+
+        contextual_message = ""
+        active_users = self.get_active_users()
+        if len(active_users) > 1:
+            names = ", ".join(u.display_name for u in active_users)
+            contextual_message += f"[This is a multiuser session with: {names}]\n\n"
+
+        if context_lines:
+            contextual_message += "Previous conversation:\n" + "\n".join(context_lines) + "\n\n"
+
+        contextual_message += f"{message.author.display_name}: {message.content}"
 
         return {
             'contextual_message': contextual_message,
@@ -135,7 +142,20 @@ class TutoringSession:
         }
 
     def record_conversation(self, user_session, user_message, bot_response):
-        """Record the conversation in user's history (called from tutor.py)."""
+        """Record conversation in both shared history and the individual user's history."""
+        # Shared thread log
+        self.shared_history.append({
+            'timestamp': datetime.datetime.utcnow(),
+            'user_id': user_session.user.id,
+            'username': user_session.user.display_name,
+            'user_message': user_message,
+            'bot_response': bot_response
+        })
+        # Cap shared history to last 50 entries to avoid unbounded growth
+        if len(self.shared_history) > 50:
+            self.shared_history = self.shared_history[-50:]
+
+        # Individual user history (still useful for per-user stats)
         user_session.add_to_history(user_message, bot_response)
 
     async def end_user_session(self, user):
@@ -143,8 +163,10 @@ class TutoringSession:
         if user.id in self.user_sessions:
             user_session = self.user_sessions[user.id]
             user_session.active = False
-            db.end_session(user.id, self.thread.id)
+            anonymous_user_id = db._get_or_create_anonymous_id(str(user.id), user.name)
+            db.end_session_by_anonymous_id(anonymous_user_id)
             del self.user_sessions[user.id]
+            
 
     async def end_session(self):
         """End the entire tutoring session."""
@@ -154,15 +176,15 @@ class TutoringSession:
             # End all user sessions
             for user_id, user_session in self.user_sessions.items():
                 user_session.active = False
-                db.end_session(user_id, self.thread.id)
+                anonymous_user_id = db._get_or_create_anonymous_id(str(user_session.user.id), user_session.user.name)
+                db.end_session_by_anonymous_id(anonymous_user_id)
 
-            # Notify users
             user_mentions = [f"<@{user_id}>" for user_id in self.user_sessions.keys()]
             if user_mentions:
-                mentions_text = ", ".join(user_mentions)
-                await self.thread.send(f"✅ {mentions_text}, the tutoring session has ended. Please provide feedback with `/feedback <1-5>`.")
+                await self.thread.send(f"✅ {', '.join(user_mentions)}, the tutoring session has ended. Please provide feedback with `/feedback <1-5>`.")
 
             self.user_sessions.clear()
+            self.shared_history.clear()
 
     def get_active_users(self) -> list:
         """Get list of active users in the session."""
@@ -233,39 +255,3 @@ class SessionManager:
 # Global session manager instance
 session_manager = SessionManager()
 
-# Bot Command Handlers 
-async def start_session_command(slash):
-    """Start a new tutoring session in the current thread."""
-    session = session_manager.create_session(slash.channel)
-    await slash.send(f"🎓 Tutoring session started! Users can now ask questions and I'll maintain separate conversations with each person.")
-
-async def join_session_command(slash):
-    """Join an existing tutoring session."""
-    session = session_manager.get_session(slash.channel.id)
-    if session and session.active:
-        user_session = session.add_user(slash.author)
-        await slash.send(f"✅ {slash.author.mention}, you've joined the tutoring session!")
-    else:
-        await slash.send("❌ No active tutoring session in this thread. Start one with `/start_session`.")
-
-async def leave_session_command(slash):
-    """Leave the current tutoring session."""
-    session = session_manager.get_session(slash.channel.id)
-    if session:
-        await session.end_user_session(slash.author)
-    else:
-        await slash.send("❌ No active tutoring session in this thread.")
-
-async def session_stats_command(slash):
-    """Show statistics about the current session."""
-    session = session_manager.get_session(slash.channel.id)
-    if session and session.active:
-        stats = session.get_session_stats()
-        await slash.send(f"📊 Session Stats:\n"
-                        f"• Total users: {stats['total_users']}\n"
-                        f"• Active users: {stats['active_users']}\n"
-                        f"• Total responses: {stats['total_responses']}\n"
-                        f"• Duration: {stats['session_duration']:.0f} seconds\n"
-                        f"• Users: {', '.join(stats['users'])}")
-    else:
-        await slash.send("❌ No active tutoring session in this thread.")
