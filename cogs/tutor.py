@@ -284,7 +284,7 @@ class Tutor(commands.Cog):
     async def start_new_session(self, interaction: discord.Interaction):
         """Starts a completely new tutoring session, clearing previous conversation history."""
         # Check if user has administrator permissions
-        if not interaction.user.guild_permissions.administrator:
+        if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ This command is restricted to administrators only.", ephemeral=True)
             return
 
