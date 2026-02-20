@@ -98,15 +98,19 @@ class Tutor(commands.Cog):
         # Create new thread if none found
         if isinstance(interaction.channel, discord.Thread):
             parent_channel = interaction.channel.parent
+            if not isinstance(parent_channel, discord.TextChannel):
+                raise ValueError("Parent channel is not a text channel")
             thread = await parent_channel.create_thread(
                 name=thread_name, 
                 type=thread_type
             )
-        else:
+        elif isinstance(interaction.channel, discord.TextChannel):
             thread = await interaction.channel.create_thread(
                 name=thread_name, 
                 type=thread_type
             )
+        else:
+            raise ValueError("Cannot create threads in this type of channel")
 
         return thread
 
