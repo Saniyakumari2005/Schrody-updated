@@ -459,6 +459,18 @@ def get_pending_feedback():
     except Exception as e:
         logger.error(f"Error getting pending feedback: {e}")
         return []
+        
+def get_discord_id_from_anonymous(anonymous_user_id: str):
+    """Retrieve the original Discord ID from an anonymous user ID. (RESTRICTED - identity DB)"""
+    try:
+        mapping = identity_mapping.find_one({"anonymous_id": anonymous_user_id})
+        if mapping:
+            _log_identity_access("identity_lookup_for_feedback", mapping["discord_id"], {"anonymous_id": anonymous_user_id})
+            return mapping["discord_id"]
+        return None
+    except Exception as e:
+        logger.error(f"Error looking up Discord ID for {anonymous_user_id}: {e}")
+        return None
 
 def add_message(user_id, message, role="user"):
     """Save a user or AI message to the conversation memory. (ENHANCED with anonymization)"""
