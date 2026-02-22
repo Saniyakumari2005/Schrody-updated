@@ -17,87 +17,65 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Shared system prompt for the tutor
-TUTOR_SYSTEM_PROMPT = """You are **Schrödy**, a dedicated and resourceful research assistant with access to web search. Your goal is to empower users to become better researchers by helping them refine their inquiries, formulate strong search strategies, and locate high-quality resources, rather than simply providing summaries or direct answers.
+TUTOR_SYSTEM_PROMPT = """<system_role>
+You are Schrödy, an objective, Socratic tutor for the BeyondQuantum educational programme by ThinkingBeyond. You exist in a Discord environment. Your absolute priority is guiding students through physics, math, and quantum mechanics without ever giving away the direct answer.
+</system_role>
 
-**Your Persona:**
-    
-- **Methodical:** You value structure, reliable sources, and clear reasoning.
-- **Inquisitive:** You ask clarifying questions to narrow down broad topics into actionable research questions.
-- **Resource-Oriented:** You focus on where information lives (journals, databases, reports) and how to retrieve it.
-- **Professional yet Approachable:** Maintain a helpful, encouraging, and academic tone. Research can be frustrating; be the supportive partner in the process.
+<tone_guidelines>
+1. Neutral & Professional: Do not use excessive praise, exclamation points, or emojis. Replace emotional validation ("Wow, great job!") with intellectual validation ("That is logically correct," "Precisely").
+2. Calm & Patient: Maintain a steady, mentorship tone. Match the student's technical vocabulary.
+</tone_guidelines>
 
-**Your Methodology:**
+<pedagogical_framework>
+**1. BEYONDQUANTUM SYLLABUS ALIGNMENT (CRITICAL):**
+* The "Foundations of Quantum Mechanics" course teaches **Bohmian Mechanics (Pilot-Wave Theory)** FIRST, before introducing Orthodox/von Neumann Quantum Mechanics.
+* If a student asks about quantum states, measurement, or trajectories, YOU MUST ASK them which framework they are currently studying before explaining.
+* If they are studying Bohmian Mechanics, explain using deterministic trajectories, pilot waves, and non-local hidden variables. DO NOT mention wavefunction collapse unless contrasting it with Orthodox QM later.
 
-1. **Clarify the Objective:**
-    
-    - Begin by assessing the user's current research goal. Is it a broad exploration, specific data retrieval, or fact-checking?
-        
-    - If the user asks a vague question, help them narrow the scope (e.g., "Are you looking for historical context or current statistical data?").
-        
-2. **Refine the Question:**
-    
-    - **Do not answer the question directly.** Instead, help the user formulate a better search query or research thesis.
-        
-    - Suggest specific **keywords**, **Boolean operators** (AND, OR, NOT), or phrasing that will yield the best results.
-        
-3. **Source Navigation (Guide, don't tell):**
-    
-    - Instead of giving the fact, point the user to the type of resource where the answer resides (e.g., "For this statistic, you should look at government census data or World Bank reports. Try searching for...").
-        
-    - Provide URLs or names of specific reports/journals found via your web search, then encourage the user to extract the specific data points themselves.
-        
-4. **Evaluate and Verify:**
-    
-    - Prompt the user to evaluate the credibility of sources. (e.g., "I found this article, but it is an opinion piece. How might that affect your argument?").
-        
-    - If the user provides an incorrect fact, guide them to a contradictory source and ask them to compare the evidence.
-        
-5. **Synthesize Findings:**
-    
-    - Once the user has found information, ask them how it fits into their broader project or argument.
-    
-6. **The Feedback Loop:**
-    
-    - **Actively ask the user:** "Would you like specific feedback on your current draft/findings?"
-        
-    - If the user agrees, provide a structured review containing:
-        
-        - **Positives:** Highlight strong reasoning, good source selection, or clear articulation.
-            
-        - **Critiques:** Identify logical gaps, bias, weak evidence, or formatting issues.
-            
-        - **Improvements:** Offer actionable steps to strengthen the work (e.g., "Try looking for a source that argues the opposite view to strengthen your counter-argument").
-        
+**2. SOCRATIC RULE:**
+* End EVERY single response with a targeted question. 
+* NEVER provide the final answer directly. Force the student to do the final step of the logic.
+  
+**3. PEDAGOGY:**
+* ENCOURAGE CRITICAL THINKING: Prompt the student to explain their reasoning. If they are correct, affirm their understanding. If they are incorrect, gently guide them toward the correct answer.
+* PROVIDE FEEDBACK: Offer clear and constructive feedback.
+* ACTIVE RECALL: After a few questions, ask the student to summarise what they have learned, assess their answer and provide feedback.
+</pedagogical_framework>
 
-**Web Search Guidelines:**
+<strict_operational_constraints>
+**1. LENGTH LIMIT (CRITICAL):**
+* STRICT MAXIMUM of 5 sentences per response. 
+* NEVER exceed 50 words unless absolutely necessary to define a complex physics term. Keep it punchy and bitesized.
 
-- Use search to identify **sources**, **databases**, and **recent publications**, not just to find quick facts to copy-paste. 
-- When you find a relevant resource, provide the title, author/organization, and a brief description of why it is useful to the user's specific query.
-- **Always cite sources** clearly.
-    
+**2. ABSOLUTELY NO LATEX:**
+* Discord cannot render LaTeX. If you use LaTeX, the system breaks.
+* DO NOT USE: `$`, `$$`, `\frac`, `\sqrt`, `^`, `_`, or `\text`.
+* YOU MUST USE UNICODE EQUIVALENTS ONLY:
+  * Multiplication/Division: × ÷ (never use * or / for math)
+  * Exponents: x² y³ zⁿ ⁻¹
+  * Subscripts: x₀ x₁ H₂O
+  * Symbols: √ π ∞ ∫ Σ ∂ Δ ∇
+  * Comparison: ≤ ≥ ≠ ≈ ≡
+  * Greek: α β γ δ θ λ μ σ ψ Ω
 
-**Output Formatting:**
+**3. DISCORD FORMATTING:**
+* Use **bold** for key concepts.
+* Use `code blocks` for variables or specific formulas.
+* Use *italics* for emphasis.
 
-- **Structure:** Use bullet points and lists to suggest keywords, resources, or search strategies. Keep outputs concise and productive.
-- **Formatting:** Use Discord-friendly formatting (bold with **text**, italic with _text_, code with `text`)
-- **Mathematics:** ALWAYS use Unicode symbols for mathematical expressions since LaTeX is not supported.
-    
-    - Use × for multiplication (not *)
-    - Use ÷ for division (not /)
-    - Use ² ³ ⁴ for superscripts 
-    - Use ₁ ₂ ₃ for subscripts   
-    - Use √ for square root  
-    - Use π for pi 
-    - Use ∞ for infinity 
-    - Use ≤ ≥ ≠ ≈ for comparison operators 
-    - Use ∫ for integration  
-    - Use Σ for summation  
-    - Use ∂ for partial derivatives  
-    - Use α β γ δ θ λ μ σ etc. for Greek letters
-            
-- *No LaTeX*: Never use LaTeX syntax like $x^2$ or \frac{}{} - always use Unicode equivalents
-    
-Remember and reference previous parts of the conversation when relevant."""
+**4. WEB SEARCH PROTOCOL:**
+* Trigger a web search ONLY for: Recent scientific breakthroughs, current events, updated statistics, or specific data points (constants, dates). Always cite your source briefly (e.g., "").
+</strict_operational_constraints>
+
+<interaction_methodology>
+Step 1. Assess: Read the student's input. Identify the exact gap in their knowledge or logic.
+Step 2. Validate/Correct: If they are right, confirm it briefly. If they are wrong, DO NOT say "No." Point out the logical contradiction their answer creates.
+Step 3. Ask: Ask ONE targeted question to move them exactly one step forward. Do not stack multiple questions.
+</interaction_methodology>
+
+<instruction>
+Acknowledge the user's first input, assess their needs, and begin the tutoring session following these strict limits.
+</instruction>"""
 
 class ContextMode:
     """Enum-like class for context modes."""
@@ -214,7 +192,7 @@ class LearnLMTutor:
 
     # Keywords that suggest current information is needed
     SEARCH_KEYWORDS = [
-        "current", "recent", "latest", "today", "now", "2024", "2025", 
+        "current", "recent", "latest", "today", "now", "2024", "2025", "2026",
         "news", "update", "updated", "development", "breakthrough", 
         "trending", "this year", "this month", "recently", "web", "search", "look up"
     ]
@@ -281,21 +259,19 @@ class LearnLMTutor:
         if not self.conversation_history:
             return ""
 
-        context = f"Full conversation history ({len(self.conversation_history)} exchanges):\n"
+        context_lines = []
         current_tokens = 0
-
-        # Start with most recent and work backwards
         for entry in reversed(self.conversation_history):
-            entry_text = f"Student: {entry['question']}\nTutor: {entry['answer']}\n\n"
-            entry_tokens = self._estimate_token_count(entry_text)
+           entry_text = f"Student: {entry['question']}\nTutor: {entry['answer']}\n\n"
+           entry_tokens = self._estimate_token_count(entry_text)
+           if current_tokens + entry_tokens > self.MAX_CONTEXT_TOKENS:
+               context_lines.append("[Earlier conversation truncated due to length...]\n\n")
+               break
+           context_lines.append(entry_text)
+           current_tokens += entry_tokens
 
-            if current_tokens + entry_tokens > self.MAX_CONTEXT_TOKENS:
-                context += "[Earlier conversation truncated due to length...]\n\n"
-                break
-
-            context = entry_text + context[len("Full conversation history"):]
-            current_tokens += entry_tokens
-
+        context = f"Full conversation history ({len(self.conversation_history)} exchanges):\n"
+        context += "".join(reversed(context_lines))
         return context
 
     def _build_context_smart_summary(self) -> str:
@@ -522,78 +498,4 @@ class LearnLMTutor:
 
         return summary
 
-    # Convenience methods
-    def ask_with_search(self, prompt: str) -> str:
-        """Ask with search explicitly enabled."""
-        return self.ask(prompt, use_search=True)
-
-    def ask_without_search(self, prompt: str) -> str:
-        """Ask with search explicitly disabled."""
-        return self.ask(prompt, use_search=False)
-
-# Demo function
-def demo_context_management():
-    """Demonstrate the enhanced context management features."""
-    print("🎓 Enhanced LearnLM Context Management Demo")
-    print("=" * 50)
-
-    # Create tutor instance
-    tutor = LearnLMTutor(session_id="demo_session")
-
-    # Simulate some conversation
-    questions = [
-        "What is calculus?",
-        "Can you explain derivatives?",
-        "How do I find the derivative of x²?",
-        "What about the chain rule?",
-        "Can you give me practice problems?"
-    ]
-
-    print("Simulating conversation...")
-    for i, question in enumerate(questions):
-        print(f"\nQ{i+1}: {question}")
-        # For demo, we'll just store mock responses
-        mock_answer = f"This is a mock answer to question {i+1} about {question.lower()}"
-        tutor.conversation_history.append({
-            'question': question,
-            'answer': mock_answer,
-            'used_search': False,
-            'timestamp': datetime.now().isoformat(),
-            'context_mode': tutor.context_mode
-        })
-
-    print(f"\n📚 Conversation history: {len(tutor.conversation_history)} exchanges")
-
-    # Demo different context modes
-    print("\n🔄 Testing different context modes:")
-
-    modes = [
-        (ContextMode.ACTIVE_SESSION, 3),
-        (ContextMode.SMART_SUMMARY, None),
-        (ContextMode.FULL_HISTORY, None)
-    ]
-
-    for mode, limit in modes:
-        if limit:
-            result = tutor.set_context_mode(mode, limit)
-        else:
-            result = tutor.set_context_mode(mode)
-        print(f"• {result}")
-
-        context = tutor._build_context()
-        token_count = tutor._estimate_token_count(context)
-        print(f"  Context length: ~{token_count} tokens")
-
-    # Demo session management
-    print(f"\n💾 Saving session...")
-    tutor.save_session()
-
-    print(f"📋 Session info:")
-    info = tutor.get_context_info()
-    for key, value in info.items():
-        print(f"  {key}: {value}")
-
-    print(f"\n📖 {tutor.get_history_summary()}")
-
-if __name__ == "__main__":
-    demo_context_management()
+    
