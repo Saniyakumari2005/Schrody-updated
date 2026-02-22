@@ -12,3 +12,26 @@ ignorePorts = true
 
 [agent]
 expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Bot"
+
+[[workflows.workflow]]
+name = "Bot"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python bot.py"
+
+[workflows.workflow.metadata]
+outputType = "console"

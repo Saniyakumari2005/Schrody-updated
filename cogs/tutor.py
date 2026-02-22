@@ -87,9 +87,14 @@ class Tutor(commands.Cog):
             print(f"Error accessing archived threads: {e}")
 
         # Determine thread type based on channel configuration
-        channel_id = interaction.channel.id
-        if isinstance(interaction.channel, discord.Thread):
-            channel_id = interaction.channel.parent.id
+        channel = interaction.channel
+        if channel is None:
+            raise ValueError("Cannot create threads without a channel")
+        channel_id = channel.id
+        if isinstance(channel, discord.Thread):
+            if channel.parent is None:
+                raise ValueError("Thread has no parent channel")
+            channel_id = channel.parent.id
 
         # Check if this channel is configured for private threads
         is_private = channel_id in self.private_thread_channels
@@ -546,25 +551,29 @@ class Tutor(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     async def toggle_private_threads(self, interaction: discord.Interaction):
         """Toggle whether this channel creates private or public threads."""
-        if not interaction.user.guild_permissions.administrator:
+        if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ This command is restricted to administrators only.", ephemeral=True)
             return
 
-        channel_id = interaction.channel.id
+        channel = interaction.channel
+        if channel is None:
+            await interaction.response.send_message("❌ Could not determine the channel.", ephemeral=True)
+            return
+
+        channel_id = channel.id
 
         if channel_id in self.private_thread_channels:
-            # Currently set to private, switch to public
             self.private_thread_channels.remove(channel_id)
             new_type = "**public**"
             emoji = "🌐"
         else:
-            # Currently public (or default), switch to private  
             self.private_thread_channels.add(channel_id)
             new_type = "**private**"
             emoji = "🔒"
 
+        channel_mention = getattr(channel, 'mention', f"#{channel_id}")
         await interaction.response.send_message(
-            f"{emoji} {interaction.channel.mention} will now create {new_type} threads for tutoring sessions.",
+            f"{emoji} {channel_mention} will now create {new_type} threads for tutoring sessions.",
             ephemeral=True
         )
 
@@ -572,11 +581,16 @@ class Tutor(commands.Cog):
     @app_commands.default_permissions(administrator=True) 
     async def thread_status(self, interaction: discord.Interaction):
         """Check the current thread creation setting for this channel."""
-        if not interaction.user.guild_permissions.administrator:
+        if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ This command is restricted to administrators only.", ephemeral=True)
             return
 
-        channel_id = interaction.channel.id
+        channel = interaction.channel
+        if channel is None:
+            await interaction.response.send_message("❌ Could not determine the channel.", ephemeral=True)
+            return
+
+        channel_id = channel.id
 
         if channel_id in self.private_thread_channels:
             status = "🔒 **Private threads**"
@@ -585,8 +599,9 @@ class Tutor(commands.Cog):
             status = "🌐 **Public threads** (default)"
             description = "All server members can see the threads"
 
+        channel_name = getattr(channel, 'name', f"Channel {channel_id}")
         embed = discord.Embed(
-            title=f"Thread Setting for {interaction.channel.name}",
+            title=f"Thread Setting for {channel_name}",
             description=f"{status}\n\n{description}",
             color=discord.Color.blue()
         )
@@ -862,7 +877,8 @@ class Tutor(commands.Cog):
                                     {"$set": {"thread_reminder_sent": True}}
                                 )
                                 break
-                            
+                            except Exception as e:
+                                print(f"Error sending inactivity reminder to thread: {e}")
                         else:
                             # Mark as reminded even if thread not found to prevent spam
                             db.sessions_collection.update_one(
