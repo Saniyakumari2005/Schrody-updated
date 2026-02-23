@@ -248,7 +248,8 @@ def start_session(user_id, username, thread_id=None):
             "start_time": now,
             "last_activity": now,
             "active": True,
-            "thread_hash": _hash_user_id(str(thread_id)) if thread_id else None,  # Hash thread ID for privacy
+            "thread_hash": _hash_user_id(str(thread_id)) if thread_id else None,  
+            "thread_id": thread_id,
             "feedback_given": False,
             "username_hash": _hash_user_id(username),  # Hash username for privacy
             "retention_date": now + datetime.timedelta(days=90),
