@@ -161,7 +161,7 @@ class Tutor(commands.Cog):
 
             if view.consent is True:
                 db.users_collection.update_one(
-                    {"anonymous_user_id": anonymous_user_id_check},
+                    {"anonymous_id": anonymous_user_id_check},
                     {"$set": {"consent": True, "consent_timestamp": datetime.datetime.utcnow()}},
                     upsert=True
                 )
@@ -233,7 +233,7 @@ class Tutor(commands.Cog):
                     inline=False
                 )
 
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"✅ {user.mention}, your session has been resumed in {thread.mention}!",
                     ephemeral=True
                 )
@@ -263,7 +263,7 @@ class Tutor(commands.Cog):
                     inline=False
                 )
 
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"📚 Tutoring session started in {thread.mention}!",
                     ephemeral=True
                 )
@@ -273,12 +273,12 @@ class Tutor(commands.Cog):
             print(f"Error in start_session: {e}")
             try:
                 if not interaction.response.is_done():
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         "❌ An error occurred while setting up your session. Please try again.",
                         ephemeral=True
                     )
                 else:
-                    await interaction.followup.send(
+                    await interaction.response.send_message(
                         "❌ An error occurred while setting up your session. Please try again.",
                         ephemeral=True
                     )
