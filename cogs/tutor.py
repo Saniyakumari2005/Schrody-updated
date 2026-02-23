@@ -850,7 +850,7 @@ class Tutor(commands.Cog):
                         
                     elif time_since_activity >= datetime.timedelta(minutes=15) and not session.get("second_reminder_sent", False):
                         thread_id = session.get("thread_id")
-                        tutoring_session = session_manager.get_session(thread_id) if thread_id else None
+                        tutoring_session = session_manager.get_session(int(thread_id)) if thread_id else None
                         if tutoring_session:
                             try:
                                 embed = discord.Embed(
@@ -878,12 +878,9 @@ class Tutor(commands.Cog):
 
                     # 5 minutes - send thread reminder (only if not already sent)
                     elif time_since_activity >= datetime.timedelta(minutes=5) and not session.get("thread_reminder_sent", False):
-                        # Find the thread through session manager by thread hash
                         thread_id = session.get("thread_id")
-                        tutoring_session = session_manager.get_session(thread_id) if thread_id else None
+                        tutoring_session = session_manager.get_session(int(thread_id)) if thread_id else None
                         if tutoring_session:
-                            # Find matching thread in session manager
-                            
                             try:
                                 embed = discord.Embed(
                                     title="💤 Are you still there?",
@@ -901,18 +898,12 @@ class Tutor(commands.Cog):
                                     inline=False
                                 )
                                 await tutoring_session.thread.send(embed=embed)
-                                db.sessions_collection.update_one(
-                                    {"anonymous_user_id": anonymous_user_id, "active": True},
-                                    {"$set": {"thread_reminder_sent": True}}
-                                )
                             except Exception as e:
                                 print(f"Error sending inactivity reminder to thread: {e}")
-                        else:
-                            # Mark as reminded even if thread not found to prevent spam
-                            db.sessions_collection.update_one(
-                                {"anonymous_user_id": anonymous_user_id, "active": True},
-                                {"$set": {"thread_reminder_sent": True}}
-                            )
+                        db.sessions_collection.update_one(
+                            {"anonymous_user_id": anonymous_user_id, "active": True},
+                            {"$set": {"thread_reminder_sent": True}}
+                        )
 
                 except Exception as e:
                     print(f"Error processing session for user {session.get('anonymous_user_id', 'unknown')}: {e}")
