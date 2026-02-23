@@ -673,27 +673,16 @@ class Tutor(commands.Cog):
                     )
                     await message.channel.send(embed=embed, delete_after=15)
 
-            # Update last activity for this user's session
+            # Update last activity for this user's session and reset reminders
             db.sessions_collection.update_one(
                 {"anonymous_user_id": anonymous_user_id, "active": True},
                 {"$set": {
                     "last_activity": datetime.datetime.utcnow(),
+                    "dm_warning_sent": False,
                     "thread_reminder_sent": False,
                     "second_reminder_sent": False
                 }}
             )
-
-            # Update last activity time for any active session
-            if existing_session:
-                db.sessions_collection.update_one(
-                    {"anonymous_user_id": anonymous_user_id, "active": True},
-                    {"$set": {
-                        "last_activity": datetime.datetime.utcnow(),
-                        "dm_warning_sent": False,
-                        "thread_reminder_sent": False,
-                        "second_reminder_sent": False
-                    }}
-                )
 
             # Show thinking indicator
             user_display_name = self.get_user_display_name(message.author, message.guild)
@@ -740,44 +729,21 @@ class Tutor(commands.Cog):
 
                 # AI PROCESSING
                 try:
-                    # Get or create tutor instance for this session
                     tutor = self.get_or_create_tutor(str(message.channel.id))
-
-                    # Use the tutor to get response
                     response = tutor.ask(context_data['contextual_message'])
 
                     if not response or not response.strip():
                         return
 
-                    # Send the response
-                    response_message = await message.channel.send(f"{message.author.mention}, {response}")
-
-                    # Record the conversation in session history
-                    session.record_conversation(context_data['user_session'], message.content, response)
-
-                    # ALSO save to JSON file using LearnLM tutor
-                    try:
-                        json_save_success = tutor.save_session({
-                            'user_id': str(message.author.id),
-                            'username': message.author.display_name,
-                            'thread_id': str(message.channel.id),
-                            'timestamp': datetime.datetime.utcnow().isoformat()
-                        })
-                        if not json_save_success:
-                            print(f"Warning: JSON session save failed for thread {message.channel.id}")
-                    except Exception as json_error:
-                        print(f"Warning: JSON session save error for thread {message.channel.id}: {json_error}")
-                        # Continue execution - database save already succeeded
-
                 except Exception as e:
                     print(f"Error getting AI response: {e}")
                     try:
-                        await message.channel.send(f"❌ {message.author.mention}, I encountered an error processing your message.The API servers seem busy at the moment. Please try again after some time.")
+                        await message.channel.send(f"❌ {message.author.mention}, I encountered an error processing your message. The API servers seem busy at the moment. Please try again after some time.")
                     except discord.HTTPException:
                         pass
                     return
 
-                # Delete thinking message BEFORE sending response
+                # Delete thinking message before sending response
                 if thinking_message:
                     try:
                         await thinking_message.delete()
@@ -791,7 +757,7 @@ class Tutor(commands.Cog):
                 # Record the conversation in session history
                 session.record_conversation(context_data['user_session'], message.content, response)
 
-                # ALSO save to JSON file using LearnLM tutor
+                # Save to JSON file using LearnLM tutor
                 try:
                     json_save_success = tutor.save_session({
                         'user_id': str(message.author.id),

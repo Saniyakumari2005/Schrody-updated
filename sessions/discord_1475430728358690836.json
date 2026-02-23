@@ -1,0 +1,29 @@
+{
+  "conversation_history": [
+    {
+      "question": "K Saniya 🇮🇳: hey",
+      "answer": "Hello K Saniya. I am Schrödy, your tutor for the BeyondQuantum programme. My purpose is to guide you through physics, math, and quantum mechanics.\n\nHow may I assist you with your studies today?",
+      "used_search": false,
+      "timestamp": "2026-02-23T13:47:31.676255",
+      "context_mode": "active_session"
+    },
+    {
+      "question": "Previous conversation:\nK Saniya 🇮🇳: hey\nAssistant: Hello K Saniya. I am Schrödy, your tutor for the BeyondQuantum programme. My purpose is to guide you through physics, math, and quantum mechanics.\n\nHow may I assist you with your studies today?\nK Saniya 🇮🇳: hey\nAssistant: Hello K Saniya. I am Schrödy, your tutor for the BeyondQuantum programme. My purpose is to guide you through physics, math, and quantum mechanics.\n\nHow may I assist you with your studies today?\n\nK Saniya 🇮🇳: What all can you teach?",
+      "answer": "I can guide you through topics in **physics**, **mathematics**, and **quantum mechanics** within the BeyondQuantum syllabus. My focus is on helping you understand concepts through guided inquiry.\n\nWhich of these subjects would you like to explore today?",
+      "used_search": true,
+      "timestamp": "2026-02-23T13:47:59.880388",
+      "context_mode": "active_session"
+    }
+  ],
+  "metadata": {
+    "context_mode": "active_session",
+    "active_context_limit": 5,
+    "model_name": "gemini-2.5-flash",
+    "user_id": "1358049341662822441",
+    "username": "K Saniya 🇮🇳",
+    "thread_id": "1475430728358690836",
+    "timestamp": "2026-02-23T13:48:02.178066"
+  },
+  "last_updated": "2026-02-23T13:48:02.178089",
+  "total_exchanges": 2
+}
