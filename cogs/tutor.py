@@ -166,17 +166,16 @@ class Tutor(commands.Cog):
                     upsert=True
                 )
             else:
-            # Reset consent to None so they can try again next time
-            db.users_collection.update_one(
-                {"anonymous_id": anonymous_user_id_check},
-                {"$set": {"consent": None, "consent_timestamp": datetime.datetime.utcnow()}},
-                upsert=True
-            )
-            await interaction.followup.send(
-                "❌ You declined the Terms & Conditions. Please use `/start_session` again if you change your mind.",
-                ephemeral=True
-            )
-            return
+                db.users_collection.update_one(
+                    {"anonymous_id": anonymous_user_id_check},
+                    {"$set": {"consent": None, "consent_timestamp": datetime.datetime.utcnow()}},
+                    upsert=True
+                )
+                await interaction.followup.send(
+                    "❌ You declined the Terms & Conditions. Please use `/start_session` again if you change your mind.",
+                    ephemeral=True
+                )
+                return
         
         # End Consent Check
         
