@@ -166,22 +166,18 @@ class Tutor(commands.Cog):
                     upsert=True
                 )
             else:
-                db.users_collection.update_one(
-                    {"anonymous_id": anonymous_user_id_check},
-                    {"$set": {"consent": False, "consent_timestamp": datetime.datetime.utcnow()}},
-                    upsert=True
-                )
-                await interaction.followup.send(
-                    "❌ You declined the Terms & Conditions. You cannot use the tutoring bot.",
-                    ephemeral=True
-                )
-                return
-        elif existing_user_consent.get("consent") is False:
-            await interaction.response.send_message(
-                "❌ You have previously declined the Terms & Conditions. You cannot use the tutoring bot.",
+            # Reset consent to None so they can try again next time
+            db.users_collection.update_one(
+                {"anonymous_id": anonymous_user_id_check},
+                {"$set": {"consent": None, "consent_timestamp": datetime.datetime.utcnow()}},
+                upsert=True
+            )
+            await interaction.followup.send(
+                "❌ You declined the Terms & Conditions. Please use `/start_session` again if you change your mind.",
                 ephemeral=True
             )
             return
+        
         # End Consent Check
         
         user = interaction.user
@@ -729,6 +725,18 @@ class Tutor(commands.Cog):
                 # Prepare context using session manager
                 context_data = session.prepare_context_for_message(message)
                 if not context_data:
+                    # Check if this is a consent issue so we can inform the user
+                    try:
+                        anonymous_id = db._get_or_create_anonymous_id(str(message.author.id), message.author.name)
+                        user_record = db.users_collection.find_one({"anonymous_id": anonymous_id})
+                        if not user_record or user_record.get("consent") is not True:
+                            await message.channel.send(
+                                f"{message.author.mention} ❌ You need to accept the Terms & Conditions before participating. "
+                                f"Please use `/start_session` to consent.",
+                                delete_after=15
+                            )
+                    except Exception:
+                        pass
                     return
 
                 # AI PROCESSING

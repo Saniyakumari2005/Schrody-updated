@@ -39,6 +39,7 @@ messages_collection = db["messages"]
 sessions_collection = db["sessions"]
 feedback_collection = db["feedback"]
 audit_logs = db["audit_logs"]
+shared_history_collection = db["shared_history"]
 
 # Identity Database Collections (Discord ID mappings - RESTRICTED ACCESS)
 identity_mapping = identity_db["identity_mapping"]    # Discord ID ↔ Anonymous ID mapping
@@ -472,6 +473,32 @@ def get_discord_id_from_anonymous(anonymous_user_id: str):
     except Exception as e:
         logger.error(f"Error looking up Discord ID for {anonymous_user_id}: {e}")
         return None
+        
+def save_shared_history(thread_id: str, history: list):
+    """Save the shared thread conversation history to the database."""
+    try:
+        shared_history_collection.update_one(
+            {"thread_id": str(thread_id)},
+            {"$set": {
+                "thread_id": str(thread_id),
+                "history": history,
+                "last_updated": datetime.datetime.utcnow()
+            }},
+            upsert=True
+        )
+    except Exception as e:
+        logger.error(f"Error saving shared history for thread {thread_id}: {e}")
+
+def load_shared_history(thread_id: str) -> list:
+    """Load the shared thread conversation history from the database."""
+    try:
+        doc = shared_history_collection.find_one({"thread_id": str(thread_id)})
+        if doc:
+            return doc.get("history", [])
+        return []
+    except Exception as e:
+        logger.error(f"Error loading shared history for thread {thread_id}: {e}")
+        return []
 
 def add_message(user_id, message, role="user"):
     """Save a user or AI message to the conversation memory. (ENHANCED with anonymization)"""
@@ -653,6 +680,10 @@ def _initialize_indexes():
         identity_mapping.create_index("anonymous_id", unique=True)
         access_logs.create_index("timestamp")
         access_logs.create_index("action")
+
+        # Shared history indexes
+        shared_history_collection.create_index("thread_id", unique=True)
+        shared_history_collection.create_index("last_updated")
 
         logger.info("Database indexes created successfully (anonymization-ready)")
 

@@ -68,7 +68,7 @@ class TutoringSession:
         self.user_sessions: Dict[int, UserSession] = {}
         self.session_timeout = 1800
         self._session_lock = asyncio.Lock()
-        self.shared_history = []
+        self.shared_history = db.load_shared_history(str(thread.id))
 
     def add_user(self, user) -> UserSession:
         """Add a new user to the session or return existing user session."""
@@ -156,15 +156,16 @@ class TutoringSession:
         """Record conversation in both shared history and the individual user's history."""
         # Shared thread log
         self.shared_history.append({
-            'timestamp': datetime.datetime.utcnow(),
-            'user_id': user_session.user.id,
+            'timestamp': datetime.datetime.utcnow().isoformat(),
+            'user_id': str(user_session.user.id),
             'username': user_session.user.display_name,
             'user_message': user_message,
             'bot_response': bot_response
         })
-        # Cap shared history to last 50 entries to avoid unbounded growth
         if len(self.shared_history) > 50:
             self.shared_history = self.shared_history[-50:]
+            
+        db.save_shared_history(str(self.thread.id), self.shared_history)
 
         # Individual user history (still useful for per-user stats)
         user_session.add_to_history(user_message, bot_response)
@@ -196,6 +197,10 @@ class TutoringSession:
 
             self.user_sessions.clear()
             self.shared_history.clear()
+            try:
+                db.shared_history_collection.delete_one({"thread_id": str(self.thread.id)})
+            except Exception as e:
+                print(f"Warning: Could not clear shared history for thread {self.thread.id}: {e}")
 
     def get_active_users(self) -> list:
         """Get list of active users in the session."""
