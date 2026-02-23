@@ -105,31 +105,27 @@ class TutoringSession:
         except Exception as e:
             print(f"Error in remove_inactive_users: {e}")
 
+    def prepare_context_for_message(self, message):
+        """Prepare shared conversation context for AI processing."""
+        if not self.active:
+            return None
 
+        self.remove_inactive_users()
 
-        def prepare_context_for_message(self, message):
-            """Prepare shared conversation context for AI processing."""
-            if not self.active:
+        try:
+            anonymous_id = db._get_or_create_anonymous_id(str(message.author.id), message.author.name)
+            user_record = db.users_collection.find_one({"anonymous_id": anonymous_id})
+            if not user_record or user_record.get("consent") is not True:
                 return None
+        except Exception as e:
+            print(f"Warning: Could not check consent for user {message.author.id}: {e}")
+            return None
 
-            self.remove_inactive_users()
+        user_session = self.add_user(message.author)
 
-            # Check consent before allowing participation
-            try:
-                anonymous_id = db._get_or_create_anonymous_id(str(message.author.id), message.author.name)
-                user_record = db.users_collection.find_one({"anonymous_id": anonymous_id})
-                if not user_record or user_record.get("consent") is not True:
-                    return None  # Silently block — tutor.py will handle the notification
-            except Exception as e:
-                print(f"Warning: Could not check consent for user {message.author.id}: {e}")
-                return None  # Fail safe — block if consent can't be verified
+        if not user_session.active:
+            return None
 
-            user_session = self.add_user(message.author)
-
-            if not user_session.active:
-                return None
-
-        # Build context from shared thread history (last 10 exchanges)
         recent = self.shared_history[-10:]
         context_lines = []
         for entry in recent:
