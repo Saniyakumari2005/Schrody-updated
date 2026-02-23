@@ -82,7 +82,7 @@ class Tutor(commands.Cog):
                         print(f"Error unarchiving thread: {e}")
                         continue
         except AttributeError:
-            print(f"Warning: archived_threads method not available or different signature")
+            print("Warning: archived_threads method not available or different signature")
         except Exception as e:
             print(f"Error accessing archived threads: {e}")
 
@@ -146,10 +146,10 @@ class Tutor(commands.Cog):
             consent_embed = discord.Embed(
                 title="📋 Terms & Conditions",
                 description=(
-                    "Before using this tutoring bot, please read and accept our [Terms & Conditions](https://drive.google.com/file/d/1yQUrUAg1JUoYnhCDBFEY78j6jIIGWACm/view?usp=sharing).\n\n"
+                    "Before using this tutoring bot, please read and accept our [Data Privacy Statement](https://drive.google.com/file/d/1yQUrUAg1JUoYnhCDBFEY78j6jIIGWACm/view?usp=sharing).\n\n"
                     "**By clicking Yes, you agree to:**\n"
                     "- Your messages being stored for session continuity\n"
-                    "- Anonymous usage data being collected for improvement\n"
+                    "- Anonymous usage data being used for improvements and educational research\n"
                     "- Abiding by the server's rules during tutoring sessions\n\n"
                     "**If you decline, you will not be able to use the bot.**"
                 ),
@@ -770,12 +770,32 @@ class Tutor(commands.Cog):
                         pass
                     return
 
-                # Delete thinking message if it exists
+                # Delete thinking message BEFORE sending response
                 if thinking_message:
                     try:
                         await thinking_message.delete()
+                        thinking_message = None
                     except (discord.NotFound, discord.HTTPException):
                         pass
+
+                # Send the response
+                response_message = await message.channel.send(f"{message.author.mention}, {response}")
+
+                # Record the conversation in session history
+                session.record_conversation(context_data['user_session'], message.content, response)
+
+                # ALSO save to JSON file using LearnLM tutor
+                try:
+                    json_save_success = tutor.save_session({
+                        'user_id': str(message.author.id),
+                        'username': message.author.display_name,
+                        'thread_id': str(message.channel.id),
+                        'timestamp': datetime.datetime.utcnow().isoformat()
+                    })
+                    if not json_save_success:
+                        print(f"Warning: JSON session save failed for thread {message.channel.id}")
+                except Exception as json_error:
+                    print(f"Warning: JSON session save error for thread {message.channel.id}: {json_error}")
 
             except Exception as e:
                 print(f"Error in message processing: {e}")

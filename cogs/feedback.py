@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 import db
 import datetime
+import asyncio
 
 class Feedback(commands.Cog):
     def __init__(self, bot):
@@ -77,6 +78,7 @@ class Feedback(commands.Cog):
     @remind_feedback.before_loop
     async def before_remind_feedback(self):
         await self.bot.wait_until_ready()
+        await asyncio.sleep(300) 
         
 async def setup(bot):
     await bot.add_cog(Feedback(bot))
