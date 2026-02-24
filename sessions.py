@@ -112,15 +112,6 @@ class TutoringSession:
 
         self.remove_inactive_users()
 
-        try:
-            anonymous_id = db._get_or_create_anonymous_id(str(message.author.id), message.author.name)
-            user_record = db.users_collection.find_one({"anonymous_id": anonymous_id})
-            if not user_record or user_record.get("consent") is not True:
-                return None
-        except Exception as e:
-            print(f"Warning: Could not check consent for user {message.author.id}: {e}")
-            return None
-
         user_session = self.add_user(message.author)
 
         if not user_session.active:

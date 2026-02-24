@@ -152,7 +152,7 @@ class Tutor(commands.Cog):
                     "- Your messages being stored for session continuity\n"
                     "- Anonymous usage data being used for improvements and educational research\n"
                     "- Abiding by the server's rules during tutoring sessions\n\n"
-                    "**If you decline, you will not be able to use the bot.**"
+                    "**If you decline, you will be asked again next time.**"
                 ),
                 color=discord.Color.blurple()
             )
@@ -647,18 +647,6 @@ class Tutor(commands.Cog):
             user_id = str(message.author.id)
             user_int_id = message.author.id
             anonymous_user_id = db._get_or_create_anonymous_id(user_id, str(message.author))
-
-            # Check consent BEFORE creating any session or storing data
-            user_record = db.users_collection.find_one({"anonymous_id": anonymous_user_id})
-            if not user_record or user_record.get("consent") is not True:
-                if user_int_id not in self._consent_warned_users:
-                    self._consent_warned_users.add(user_int_id)
-                    await message.channel.send(
-                        f"{message.author.mention} ❌ You need to accept the Terms & Conditions before participating. "
-                        f"Please use `/start_session` to consent.",
-                        delete_after=15
-                    )
-                return
 
             existing_session = db.sessions_collection.find_one({"anonymous_user_id": anonymous_user_id, "active": True})
 
