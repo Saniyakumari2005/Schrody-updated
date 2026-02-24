@@ -28,6 +28,7 @@ class Tutor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.guest_participation_asked = set()
+        self._consent_warned_users = set()
         self.check_inactive_sessions.start()
         self.private_thread_channels = set()  # Channels that should create private threads
 
@@ -643,17 +644,26 @@ class Tutor(commands.Cog):
             self._message_processing_cache[unique_key] = current_time
 
         try:
-            # Handle guest participation
             user_id = str(message.author.id)
             user_int_id = message.author.id
-            # Get anonymous user ID for database operations
             anonymous_user_id = db._get_or_create_anonymous_id(user_id, str(message.author))
+
+            # Check consent BEFORE creating any session or storing data
+            user_record = db.users_collection.find_one({"anonymous_id": anonymous_user_id})
+            if not user_record or user_record.get("consent") is not True:
+                if user_int_id not in self._consent_warned_users:
+                    self._consent_warned_users.add(user_int_id)
+                    await message.channel.send(
+                        f"{message.author.mention} ❌ You need to accept the Terms & Conditions before participating. "
+                        f"Please use `/start_session` to consent.",
+                        delete_after=15
+                    )
+                return
+
             existing_session = db.sessions_collection.find_one({"anonymous_user_id": anonymous_user_id, "active": True})
 
-            
             # Register user in DB if they don't have an active session (guest)
             if not existing_session:
-                # Register them as a participant in the thread's session
                 db.start_session(message.author.id, message.author.name, message.channel.id)
                 existing_session = db.sessions_collection.find_one(
                     {"anonymous_user_id": anonymous_user_id, "active": True}
@@ -713,18 +723,6 @@ class Tutor(commands.Cog):
                 # Prepare context using session manager
                 context_data = session.prepare_context_for_message(message)
                 if not context_data:
-                    # Check if this is a consent issue so we can inform the user
-                    try:
-                        anonymous_id = db._get_or_create_anonymous_id(str(message.author.id), message.author.name)
-                        user_record = db.users_collection.find_one({"anonymous_id": anonymous_id})
-                        if not user_record or user_record.get("consent") is not True:
-                            await message.channel.send(
-                                f"{message.author.mention} ❌ You need to accept the Terms & Conditions before participating. "
-                                f"Please use `/start_session` to consent.",
-                                delete_after=15
-                            )
-                    except Exception:
-                        pass
                     return
 
                 # AI PROCESSING
