@@ -186,7 +186,9 @@ class Tutor(commands.Cog):
                     )
                     return
         
-        # End Consent Check
+        # End Consent Check - defer if we haven't responded yet
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         
         user = interaction.user
         user_display_name = self.get_user_display_name(user, interaction.guild)
@@ -276,7 +278,7 @@ class Tutor(commands.Cog):
         except Exception as e:
             print(f"Error in start_session: {e}")
             try:
-                if not interaction.response.is_done():
+                if interaction.response.is_done():
                     await interaction.followup.send(
                         "❌ An error occurred while setting up your session. Please try again.",
                         ephemeral=True
