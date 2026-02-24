@@ -15,17 +15,20 @@ class Feedback(commands.Cog):
         """Logs user feedback."""
         try:
             if rating < 1 or rating > 5:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ Please provide a rating between 1 and 5.")
+                await interaction.response.send_message("❌ Please provide a rating between 1 and 5.", ephemeral=True)
                 return
 
             db.log_feedback(interaction.user.id, rating)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("✅ Thanks for your feedback!")
+            await interaction.response.send_message("✅ Thanks for your feedback!")
         except Exception as e:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Error processing feedback. Please try again.")
             print(f"Error in feedback command: {e}")
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send("❌ Error processing feedback. Please try again.", ephemeral=True)
+                else:
+                    await interaction.response.send_message("❌ Error processing feedback. Please try again.", ephemeral=True)
+            except Exception:
+                pass
 
     
     @app_commands.command(name="pending_feedback", description="Show count of users with pending feedback.")

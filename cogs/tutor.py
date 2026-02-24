@@ -390,6 +390,8 @@ class Tutor(commands.Cog):
     @app_commands.command(name="resume_session", description="Resume your tutoring session (works for both active and ended sessions).")
     async def resume_session(self, interaction: discord.Interaction):
         """Resume an existing tutoring session (both active and ended sessions)."""
+        await interaction.response.defer(ephemeral=True)
+
         user = interaction.user
         user_id = str(user.id)
         user_display_name = self.get_user_display_name(user, interaction.guild)
@@ -405,7 +407,7 @@ class Tutor(commands.Cog):
             )
 
             if not recent_session:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"❌ {user.mention}, you don't have any previous sessions to resume. Use `/start_session` to begin!", 
                     ephemeral=True
                 )
@@ -465,7 +467,7 @@ class Tutor(commands.Cog):
                 inline=False
             )
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"✅ {user.mention}, your session has been resumed in {thread.mention}!", 
                 ephemeral=True
             )
@@ -474,12 +476,11 @@ class Tutor(commands.Cog):
         except Exception as e:
             print(f"Error in resume_session: {e}")
             try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        f"❌ {user.mention}, an error occurred while resuming your session. Please try again.", 
-                        ephemeral=True
-                    )
-            except discord.HTTPException:
+                await interaction.followup.send(
+                    f"❌ {user.mention}, an error occurred while resuming your session. Please try again.", 
+                    ephemeral=True
+                )
+            except Exception:
                 pass
 
     @app_commands.command(name="end_session", description="End the tutoring session.")
