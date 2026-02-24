@@ -143,40 +143,48 @@ class Tutor(commands.Cog):
         anonymous_user_id_check = db._get_or_create_anonymous_id(str(interaction.user.id), interaction.user.name)
         existing_user_consent = db.users_collection.find_one({"anonymous_id": anonymous_user_id_check})
 
-        if not existing_user_consent or existing_user_consent.get("consent") is None:
-            consent_embed = discord.Embed(
-                title="📋 Terms & Conditions",
-                description=(
-                    "Before using this tutoring bot, please read and accept our [Data Privacy Statement](https://drive.google.com/file/d/1yQUrUAg1JUoYnhCDBFEY78j6jIIGWACm/view?usp=sharing).\n\n"
-                    "**By clicking Yes, you agree to:**\n"
-                    "- Your messages being stored for session continuity\n"
-                    "- Anonymous usage data being used for improvements and educational research\n"
-                    "- Abiding by the server's rules during tutoring sessions\n\n"
-                    "**If you decline, you will be asked again next time.**"
-                ),
-                color=discord.Color.blurple()
-            )
-            view = ConsentView()
-            await interaction.response.send_message(embed=consent_embed, view=view, ephemeral=True)
-            await view.wait()
+        if not existing_user_consent or existing_user_consent.get("consent") is not True:
+            has_responded = False
+            while True:
+                consent_embed = discord.Embed(
+                    title="📋 Terms & Conditions",
+                    description=(
+                        "Before using this tutoring bot, please read and accept our [Data Privacy Statement](https://drive.google.com/file/d/1yQUrUAg1JUoYnhCDBFEY78j6jIIGWACm/view?usp=sharing).\n\n"
+                        "**By clicking Yes, you agree to:**\n"
+                        "- Your messages being stored for session continuity\n"
+                        "- Anonymous usage data being used for improvements and educational research\n"
+                        "- Abiding by the server's rules during tutoring sessions\n\n"
+                        "You must accept to use the tutoring bot."
+                    ),
+                    color=discord.Color.blurple()
+                )
+                view = ConsentView()
+                if not has_responded:
+                    await interaction.response.send_message(embed=consent_embed, view=view, ephemeral=True)
+                    has_responded = True
+                else:
+                    await interaction.followup.send(embed=consent_embed, view=view, ephemeral=True)
+                await view.wait()
 
-            if view.consent is True:
-                db.users_collection.update_one(
-                    {"anonymous_id": anonymous_user_id_check},
-                    {"$set": {"consent": True, "consent_timestamp": datetime.datetime.utcnow()}},
-                    upsert=True
-                )
-            else:
-                db.users_collection.update_one(
-                    {"anonymous_id": anonymous_user_id_check},
-                    {"$set": {"consent": None, "consent_timestamp": datetime.datetime.utcnow()}},
-                    upsert=True
-                )
-                await interaction.followup.send(
-                    "❌ You declined the Terms & Conditions. Please use `/start_session` again if you change your mind.",
-                    ephemeral=True
-                )
-                return
+                if view.consent is True:
+                    db.users_collection.update_one(
+                        {"anonymous_id": anonymous_user_id_check},
+                        {"$set": {"consent": True, "consent_timestamp": datetime.datetime.utcnow()}},
+                        upsert=True
+                    )
+                    break
+                elif view.consent is False:
+                    await interaction.followup.send(
+                        "You declined the Terms & Conditions. You need to accept them to use the bot. Please try again.",
+                        ephemeral=True
+                    )
+                    continue
+                else:
+                    await interaction.followup.send(
+                        "⏰ The consent prompt timed out. Please use `/start_session` again.",
+                        ephemeral=True
+                    )
+                    return
         
         # End Consent Check
         
@@ -647,6 +655,18 @@ class Tutor(commands.Cog):
             user_id = str(message.author.id)
             user_int_id = message.author.id
             anonymous_user_id = db._get_or_create_anonymous_id(user_id, str(message.author))
+
+            # Check consent before processing - users must accept T&C via /start_session
+            user_record = db.users_collection.find_one({"anonymous_id": anonymous_user_id})
+            if not user_record or user_record.get("consent") is not True:
+                if user_int_id not in self._consent_warned_users:
+                    self._consent_warned_users.add(user_int_id)
+                    await message.channel.send(
+                        f"{message.author.mention} You need to accept the Terms & Conditions first. "
+                        f"Please use `/start_session` to get started.",
+                        delete_after=15
+                    )
+                return
 
             existing_session = db.sessions_collection.find_one({"anonymous_user_id": anonymous_user_id, "active": True})
 
