@@ -143,7 +143,10 @@ class Tutor(commands.Cog):
                 ephemeral=True
             )
             return
-            
+
+        # Defer immediately before any DB calls to stay within Discord's 3-second timeout
+        await interaction.response.defer(ephemeral=True)
+
         # Consent Check
         anonymous_user_id_check = db._get_or_create_anonymous_id(str(interaction.user.id), interaction.user.name)
         existing_user_consent = db.users_collection.find_one({"anonymous_id": anonymous_user_id_check})
@@ -162,7 +165,7 @@ class Tutor(commands.Cog):
                 color=discord.Color.blurple()
             )
             view = ConsentView()
-            await interaction.response.send_message(embed=consent_embed, view=view, ephemeral=True)
+            consent_msg = await interaction.followup.send(embed=consent_embed, view=view, ephemeral=True, wait=True)
             await view.wait()
 
             if view.consent is True:
@@ -185,18 +188,14 @@ class Tutor(commands.Cog):
                     color=discord.Color.red()
                 )
                 declined_embed.set_footer(text="You declined. Use /start_session again to be prompted.")
-                await interaction.edit_original_response(embed=declined_embed, view=None)
+                await consent_msg.edit(embed=declined_embed, view=None)
                 return
             else:
-                await interaction.edit_original_response(
+                await consent_msg.edit(
                     content="⏰ The consent prompt timed out. Please use `/start_session` again.",
                     embed=None, view=None
                 )
                 return
-        
-        # End Consent Check - defer if we haven't responded yet
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
         
         user = interaction.user
         user_display_name = self.get_user_display_name(user, interaction.guild)
