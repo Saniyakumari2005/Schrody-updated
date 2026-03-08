@@ -144,7 +144,7 @@ class Tutor(commands.Cog):
             )
             return
 
-        # Defer immediately before any DB calls to stay within Discord's 3-second timeout
+        # Defer immediately — must happen before any DB calls to meet Discord's 3-second limit
         await interaction.response.defer(ephemeral=True)
 
         # Consent Check
@@ -174,6 +174,8 @@ class Tutor(commands.Cog):
                     {"$set": {"consent": True, "consent_timestamp": datetime.datetime.utcnow()}},
                     upsert=True
                 )
+                await consent_msg.edit(content="✅ Terms accepted! Setting up your session...", embed=None, view=None)
+
             elif view.consent is False:
                 declined_embed = discord.Embed(
                     title="📋 Terms & Conditions",
