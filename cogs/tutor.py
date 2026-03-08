@@ -65,27 +65,32 @@ class Tutor(commands.Cog):
         thread_name = f"Schrödy-{user_display_name}"
 
         # Search for existing thread in active threads
-        active_threads = await guild.active_threads()
-        for thread in active_threads:
-            if thread.name == thread_name:
-                return thread
-
-        # Search in archived threads
         try:
-            async for thread in guild.archived_threads(limit=100):
+            active_threads = await guild.active_threads()
+            for thread in active_threads:
                 if thread.name == thread_name:
-                    try:
-                        await thread.edit(archived=False)
-                        return thread
-                    except discord.Forbidden:
-                        continue
-                    except Exception as e:
-                        print(f"Error unarchiving thread: {e}")
-                        continue
-        except AttributeError:
-            print("Warning: archived_threads method not available or different signature")
+                    return thread
         except Exception as e:
-            print(f"Error accessing archived threads: {e}")
+            print(f"Warning: Could not fetch active threads: {e}")
+
+        # Search in archived threads within the current channel
+        try:
+            channel = interaction.channel
+            if isinstance(channel, discord.Thread):
+                channel = channel.parent
+            if isinstance(channel, discord.TextChannel):
+                async for thread in channel.archived_threads(limit=100):
+                    if thread.name == thread_name:
+                        try:
+                            await thread.edit(archived=False)
+                            return thread
+                        except discord.Forbidden:
+                            continue
+                        except Exception as e:
+                            print(f"Error unarchiving thread: {e}")
+                            continue
+        except Exception as e:
+            print(f"Warning: Could not search archived threads: {e}")
 
         # Determine thread type based on channel configuration
         channel = interaction.channel
@@ -279,7 +284,9 @@ class Tutor(commands.Cog):
                 await thread.send(embed=embed)
 
         except Exception as e:
+            import traceback
             print(f"Error in start_session: {e}")
+            print(traceback.format_exc())
             try:
                 if interaction.response.is_done():
                     await interaction.followup.send(
