@@ -147,6 +147,10 @@ class Tutor(commands.Cog):
         # Defer immediately — must happen before any DB calls to meet Discord's 3-second limit
         await interaction.response.defer(ephemeral=True)
 
+        # Ensure the user document exists in users_collection with all required fields
+        # before any consent checks or updates
+        db.add_user(str(interaction.user.id), interaction.user.name)
+
         # Consent Check
         anonymous_user_id_check = db._get_or_create_anonymous_id(str(interaction.user.id), interaction.user.name)
         existing_user_consent = db.users_collection.find_one({"anonymous_id": anonymous_user_id_check})
@@ -171,8 +175,7 @@ class Tutor(commands.Cog):
             if view.consent is True:
                 db.users_collection.update_one(
                     {"anonymous_id": anonymous_user_id_check},
-                    {"$set": {"consent": True, "consent_timestamp": datetime.datetime.utcnow()}},
-                    upsert=True
+                    {"$set": {"consent": True, "consent_timestamp": datetime.datetime.utcnow()}}
                 )
                 await consent_msg.edit(content="✅ Terms accepted! Setting up your session...", embed=None, view=None)
 
