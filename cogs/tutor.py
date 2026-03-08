@@ -829,18 +829,45 @@ class Tutor(commands.Cog):
                         print(f"Error processing session {session_id}: missing anonymous_user_id")
                         continue
 
-                    # 30 minutes - close session
+                    # Helper: fetch the Discord thread channel by ID without needing in-memory session
+                    async def get_thread(thread_id):
+                        if not thread_id:
+                            return None
+                        try:
+                            channel = self.bot.get_channel(int(thread_id))
+                            if channel is None:
+                                channel = await self.bot.fetch_channel(int(thread_id))
+                            return channel
+                        except Exception:
+                            return None
+
+                    # 30 minutes - close session and notify thread
                     if time_since_activity >= datetime.timedelta(minutes=30):
+                        thread_id = session.get("thread_id")
+                        thread = await get_thread(thread_id)
+                        if thread:
+                            try:
+                                embed = discord.Embed(
+                                    title="🔒 Session Closed",
+                                    description="Your tutoring session has been closed due to 30 minutes of inactivity.",
+                                    color=discord.Color.red()
+                                )
+                                embed.add_field(
+                                    name="↩️ Resume anytime:",
+                                    value="Use `/start_session` to start a new session.",
+                                    inline=False
+                                )
+                                await thread.send(embed=embed)
+                            except Exception:
+                                pass
                         db.end_session_by_anonymous_id(anonymous_user_id)
-                        # Note: Cannot send DM with anonymous ID for privacy
                         print(f"Session {session_id} ended due to inactivity (30 minutes)")
-                        
+
                     # 15 minutes - second reminder
-                        
                     elif time_since_activity >= datetime.timedelta(minutes=15) and not session.get("second_reminder_sent", False):
                         thread_id = session.get("thread_id")
-                        tutoring_session = session_manager.get_session(int(thread_id)) if thread_id else None
-                        if tutoring_session:
+                        thread = await get_thread(thread_id)
+                        if thread:
                             try:
                                 embed = discord.Embed(
                                     title="⚠️ Session Closing Soon",
@@ -857,9 +884,9 @@ class Tutor(commands.Cog):
                                     value="Just send any message or question to keep your session active!",
                                     inline=False
                                 )
-                                await tutoring_session.thread.send(embed=embed)
-                            except (discord.NotFound, discord.HTTPException):
-                                pass
+                                await thread.send(embed=embed)
+                            except Exception as e:
+                                print(f"Error sending 15-min reminder to thread: {e}")
                         db.sessions_collection.update_one(
                             {"anonymous_user_id": anonymous_user_id, "active": True},
                             {"$set": {"second_reminder_sent": True}}
@@ -868,8 +895,8 @@ class Tutor(commands.Cog):
                     # 5 minutes - send thread reminder (only if not already sent)
                     elif time_since_activity >= datetime.timedelta(minutes=5) and not session.get("thread_reminder_sent", False):
                         thread_id = session.get("thread_id")
-                        tutoring_session = session_manager.get_session(int(thread_id)) if thread_id else None
-                        if tutoring_session:
+                        thread = await get_thread(thread_id)
+                        if thread:
                             try:
                                 embed = discord.Embed(
                                     title="💤 Are you still there?",
@@ -886,9 +913,9 @@ class Tutor(commands.Cog):
                                     value="Just send any message or question to keep your session active!",
                                     inline=False
                                 )
-                                await tutoring_session.thread.send(embed=embed)
+                                await thread.send(embed=embed)
                             except Exception as e:
-                                print(f"Error sending inactivity reminder to thread: {e}")
+                                print(f"Error sending 5-min reminder to thread: {e}")
                         db.sessions_collection.update_one(
                             {"anonymous_user_id": anonymous_user_id, "active": True},
                             {"$set": {"thread_reminder_sent": True}}
