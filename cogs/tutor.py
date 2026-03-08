@@ -30,10 +30,10 @@ class Tutor(commands.Cog):
         self.guest_participation_asked = set()
         self._consent_warned_users = set()
         self.check_inactive_sessions.start()
-        self.private_thread_channels = set()  # Channels that should create private threads
+        self.private_thread_channels = set() 
 
         # Message deduplication - prevents Discord from sending same message twice
-        self._message_processing_cache = {}  # {message_id: timestamp}
+        self._message_processing_cache = {} 
         self._cache_cleanup_counter = 0
         self._global_lock = asyncio.Lock()
 
