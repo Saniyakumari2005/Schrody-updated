@@ -6,6 +6,13 @@
       "used_search": false,
       "timestamp": "2026-03-06T05:12:56.913471",
       "context_mode": "active_session"
+    },
+    {
+      "question": "Dr. Filip Bar 🇨🇿: Waht is your purpose",
+      "answer": "Hello! I am Schrödy, your AI research assistant. My purpose is to empower you to become a better researcher by refining your inquiries and locating high-quality resources. What specific topic, thesis, or inquiry would you like to investigate today?",
+      "used_search": false,
+      "timestamp": "2026-04-01T20:31:14.572314",
+      "context_mode": "active_session"
     }
   ],
   "metadata": {
@@ -15,8 +22,8 @@
     "user_id": "866582108364079134",
     "username": "Dr. Filip Bar 🇨🇿",
     "thread_id": "1475516771246145560",
-    "timestamp": "2026-03-06T05:12:58.090490"
+    "timestamp": "2026-04-01T20:31:15.774648"
   },
-  "last_updated": "2026-03-06T05:12:58.090518",
-  "total_exchanges": 1
+  "last_updated": "2026-04-01T20:31:15.774667",
+  "total_exchanges": 2
 }
