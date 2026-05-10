@@ -1,0 +1,20 @@
+# .dockerignore
+.env
+.env.*
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.git
+.gitignore
+README.md
+replit.md
+COMMANDS.md
+cloudbuild.yaml
+.replit
+.agents/
+.local/
+sessions/*.json
+db_orig_backup.py
