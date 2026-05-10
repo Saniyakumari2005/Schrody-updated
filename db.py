@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import time
 import datetime
 import hashlib
 import secrets
@@ -27,8 +28,22 @@ mongo_identity_db_name = os.getenv("MONGO_IDENTITY_DB")
 if mongo_identity_db_name is None:
     raise ValueError("MONGO_IDENTITY_DB environment variable not set.")
 
-# MongoDB connection 
-mongo_client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
+# MongoDB connection
+def _connect_with_retry(url: str, retries: int = 5, delay: int = 3) -> MongoClient:
+    """Connect to MongoDB with retries for Cloud Run startup reliability."""
+    for attempt in range(retries):
+        try:
+            client = MongoClient(url, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
+            client.admin.command("ping")   # Verify the connection is live
+            logger.info("✅ MongoDB connected successfully")
+            return client
+        except Exception as e:
+            logger.warning(f"MongoDB connection attempt {attempt + 1}/{retries} failed: {e}")
+            if attempt < retries - 1:
+                time.sleep(delay)
+    raise ConnectionError("❌ Failed to connect to MongoDB after all retry attempts")
+
+mongo_client = _connect_with_retry(mongo_url)
 db = mongo_client[mongo_db_name]                      # Main operational database
 identity_db = mongo_client[mongo_identity_db_name]    # Identity mapping database
 conversations = db.conversations
