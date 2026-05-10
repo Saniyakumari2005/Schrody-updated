@@ -1,0 +1,56 @@
+# cloudbuild.yaml
+substitutions:
+  _REGION: us-central1
+  _REPO: discord-bot-repo
+  _SERVICE: discord-bot
+  _IMAGE: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Build Image'
+    args:
+      - 'build'
+      - '-t'
+      - '${_IMAGE}:${COMMIT_SHA}'
+      - '-t'
+      - '${_IMAGE}:latest'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Push Image'
+    args: ['push', '--all-tags', '${_IMAGE}']
+    waitFor: ['Build Image']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Deploy to Cloud Run'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE}'
+      - '--image=${_IMAGE}:${COMMIT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      # All 7 secrets injected as environment variables
+      - '--set-secrets=DISCORD_TOKEN=discord-token:latest'
+      - '--set-secrets=GEMINI_API_KEY=gemini-api-key:latest'
+      - '--set-secrets=GEMINI_MODEL=gemini-model:latest'
+      - '--set-secrets=MONGO_URL=mongo-url:latest'
+      - '--set-secrets=MONGO_DB=mongo-db:latest'
+      - '--set-secrets=MONGO_IDENTITY_DB=mongo-identity-db:latest'
+      - '--set-secrets=PRIVACY_SALT=privacy-salt:latest'
+      # Resource and scaling
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--min-instances=1'
+      - '--max-instances=1'
+      - '--timeout=3600'
+    waitFor: ['Push Image']
+
+images:
+  - '${_IMAGE}:${COMMIT_SHA}'
+  - '${_IMAGE}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
