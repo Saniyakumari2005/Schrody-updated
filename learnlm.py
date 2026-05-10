@@ -1,10 +1,9 @@
 import os
-import json
 from datetime import datetime, timedelta
-from pathlib import Path
 import google.generativeai as genai
 from dotenv import load_dotenv
 from typing import Optional, List, Dict, Union
+import db
 
 # Load API keys
 load_dotenv()
@@ -151,74 +150,45 @@ class ContextMode:
     SMART_SUMMARY = "smart_summary"
 
 class SessionManager:
-    """Handles session persistence and context management."""
+    """Handles session persistence using MongoDB."""
 
     def __init__(self, storage_dir: str = "sessions"):
-        self.storage_dir = Path(storage_dir)
-        self.storage_dir.mkdir(exist_ok=True)
+        # storage_dir kept for API compatibility but is no longer used
+        self._col = db.db["learnlm_sessions"]
 
     def save_session(self, session_id: str, conversation_history: List[Dict], metadata: Dict = None):
-        """Save session to persistent storage with error handling."""
+        """Save session to MongoDB."""
         try:
             session_data = {
+                'session_id': session_id,
                 'conversation_history': conversation_history,
                 'metadata': metadata or {},
                 'last_updated': datetime.now().isoformat(),
                 'total_exchanges': len(conversation_history)
             }
-
-            session_file = self.storage_dir / f"{session_id}.json"
-            
-            # Create a temporary file first to avoid corruption
-            temp_file = session_file.with_suffix('.tmp')
-            
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(session_data, f, indent=2, ensure_ascii=False)
-            
-            # Atomically replace the original file
-            temp_file.replace(session_file)
-            
-            print(f"✅ Session '{session_id}' saved successfully to {session_file}")
-            
-        except PermissionError as e:
-            print(f"❌ Permission denied when saving session '{session_id}': {e}")
-            raise
-        except OSError as e:
-            print(f"❌ OS error when saving session '{session_id}': {e}")
-            raise
-        except json.JSONEncodeError as e:
-            print(f"❌ JSON encoding error when saving session '{session_id}': {e}")
-            raise
+            self._col.update_one(
+                {"session_id": session_id},
+                {"$set": session_data},
+                upsert=True
+            )
+            print(f"✅ Session '{session_id}' saved to MongoDB")
         except Exception as e:
-            print(f"❌ Unexpected error when saving session '{session_id}': {e}")
+            print(f"❌ Error saving session '{session_id}' to MongoDB: {e}")
             raise
 
     def load_session(self, session_id: str) -> Optional[Dict]:
-        """Load session from persistent storage with error handling."""
-        session_file = self.storage_dir / f"{session_id}.json"
-        
-        if not session_file.exists():
-            print(f"📁 Session file '{session_id}.json' not found")
-            return None
-
+        """Load session from MongoDB."""
         try:
-            with open(session_file, 'r', encoding='utf-8') as f:
-                session_data = json.load(f)
-                print(f"✅ Session '{session_id}' loaded successfully")
-                return session_data
-                
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON decode error when loading session '{session_id}': {e}")
-            print(f"💡 Session file may be corrupted: {session_file}")
-            return None
-        except PermissionError as e:
-            print(f"❌ Permission denied when loading session '{session_id}': {e}")
-            return None
-        except OSError as e:
-            print(f"❌ OS error when loading session '{session_id}': {e}")
-            return None
+            doc = self._col.find_one({"session_id": session_id})
+            if not doc:
+                print(f"📁 Session '{session_id}' not found in MongoDB")
+                return None
+            doc.pop("_id", None)
+            doc.pop("session_id", None)
+            print(f"✅ Session '{session_id}' loaded from MongoDB")
+            return doc
         except Exception as e:
-            print(f"❌ Unexpected error when loading session '{session_id}': {e}")
+            print(f"❌ Error loading session '{session_id}' from MongoDB: {e}")
             return None
 
     def get_session_info(self, session_id: str) -> Optional[Dict]:
@@ -226,7 +196,6 @@ class SessionManager:
         session_data = self.load_session(session_id)
         if not session_data:
             return None
-
         return {
             'session_id': session_id,
             'last_updated': session_data.get('last_updated'),
@@ -236,16 +205,20 @@ class SessionManager:
 
     def list_sessions(self) -> List[Dict]:
         """List all available sessions with their info."""
-        sessions = []
-        for session_file in self.storage_dir.glob("*.json"):
-            session_id = session_file.stem
-            info = self.get_session_info(session_id)
-            if info:
-                sessions.append(info)
-
-        # Sort by last updated (most recent first)
-        sessions.sort(key=lambda x: x.get('last_updated', ''), reverse=True)
-        return sessions
+        try:
+            sessions = []
+            for doc in self._col.find({}, {"session_id": 1, "last_updated": 1, "total_exchanges": 1, "metadata": 1}):
+                sessions.append({
+                    'session_id': doc.get("session_id"),
+                    'last_updated': doc.get("last_updated"),
+                    'total_exchanges': doc.get("total_exchanges", 0),
+                    'metadata': doc.get("metadata", {})
+                })
+            sessions.sort(key=lambda x: x.get('last_updated', ''), reverse=True)
+            return sessions
+        except Exception as e:
+            print(f"❌ Error listing sessions from MongoDB: {e}")
+            return []
 
 class LearnLMTutor:
     """Enhanced tutor with sophisticated context management."""
