@@ -1,4 +1,4 @@
-﻿# .github/workflows/ci-cd.yaml
+# .github/workflows/ci-cd.yaml
 # Builds the Docker image, pushes to Artifact Registry, and deploys to GKE
 # on every push to main.
 #
@@ -10,7 +10,7 @@
 #   - Artifact Registry repo:  schrody-bot-repo  (us-central1)
 #   - GKE Autopilot cluster:   schrody-cluster   (us-central1)
 #   - WIF pool/provider:       github-pool / github-provider
-#   - Service account:         schrody-deployer@schrodybot.iam.gserviceaccount.com
+#   - Service account:         schrody-deployer@gen-lang-client-0745839265.iam.gserviceaccount.com
 #   - Secrets in Secret Manager (see guide step 4)
 
 name: CI/CD -- Build & Deploy to GKE
@@ -27,8 +27,8 @@ permissions:
   id-token: write
 
 env:
-  PROJECT_ID:     schrodybot
-  PROJECT_NUMBER: "49013694903"
+  PROJECT_ID:     gen-lang-client-0745839265
+  PROJECT_NUMBER: "1082238641658"
   REGION:         us-central1
   CLUSTER:        schrody-cluster
   REPO:           schrody-bot-repo

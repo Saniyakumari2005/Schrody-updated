@@ -27,7 +27,7 @@ spec:
       containers:
         - name: schrody-bot
           # CI/CD replaces this tag on every deploy (see .github/workflows/ci-cd.yaml)
-          image: us-central1-docker.pkg.dev/schrodybot/schrody-bot-repo/schrody-discord-bot:latest
+          image: us-central1-docker.pkg.dev/gen-lang-client-0745839265/schrody-bot-repo/schrody-discord-bot:latest
           imagePullPolicy: Always
           envFrom:
             - secretRef:

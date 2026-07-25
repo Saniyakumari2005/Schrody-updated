@@ -7,5 +7,5 @@ resources:
   # The Secret is created by scripts/sync-secrets.sh (locally or in CI) from
   # GCP Secret Manager, never committed here.
 images:
-  - name: us-central1-docker.pkg.dev/schrodybot/schrody-bot-repo/schrody-discord-bot
+  - name: us-central1-docker.pkg.dev/gen-lang-client-0745839265/schrody-bot-repo/schrody-discord-bot
     newTag: latest
