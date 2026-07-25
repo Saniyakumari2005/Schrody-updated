@@ -12,6 +12,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libffi-dev \
+        procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps first so Docker can cache this layer between builds

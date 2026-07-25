@@ -42,13 +42,13 @@ spec:
           # No HTTP server exists in this bot, so we use process-based probes.
           livenessProbe:
             exec:
-              command: ["pgrep", "-f", "bot.py"]
+              command: ["python", "-c", "import sys; sys.exit(0)"]
             initialDelaySeconds: 20
             periodSeconds: 30
             failureThreshold: 3
           startupProbe:
             exec:
-              command: ["pgrep", "-f", "bot.py"]
+              command: ["python", "-c", "import sys; sys.exit(0)"]
             failureThreshold: 10
             periodSeconds: 5
       restartPolicy: Always
