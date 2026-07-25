@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: schrody-bot
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  # The Secret is created by scripts/sync-secrets.sh (locally or in CI) from
+  # GCP Secret Manager, never committed here.
+images:
+  - name: us-central1-docker.pkg.dev/schrodybot/schrody-bot-repo/schrody-discord-bot
+    newTag: latest

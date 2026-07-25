@@ -1,0 +1,122 @@
+﻿# .github/workflows/ci-cd.yaml
+# Builds the Docker image, pushes to Artifact Registry, and deploys to GKE
+# on every push to main.
+#
+# Authentication uses Workload Identity Federation -- no long-lived JSON keys
+# are stored in GitHub. GitHub's OIDC token is exchanged for a short-lived
+# GCP token at run time.
+#
+# Pre-requisites (one-time manual setup -- see the deployment guide):
+#   - Artifact Registry repo:  schrody-bot-repo  (us-central1)
+#   - GKE Autopilot cluster:   schrody-cluster   (us-central1)
+#   - WIF pool/provider:       github-pool / github-provider
+#   - Service account:         schrody-deployer@schrodybot.iam.gserviceaccount.com
+#   - Secrets in Secret Manager (see guide step 4)
+
+name: CI/CD -- Build & Deploy to GKE
+
+on:
+  push:
+    branches: [main]
+
+# Minimum required permissions:
+#   contents: read  -- check out the repo
+#   id-token: write -- request a short-lived OIDC token for WIF auth
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID:     schrodybot
+  PROJECT_NUMBER: "49013694903"
+  REGION:         us-central1
+  CLUSTER:        schrody-cluster
+  REPO:           schrody-bot-repo
+  IMAGE:          schrody-discord-bot
+  NAMESPACE:      schrody-bot
+
+jobs:
+  build-and-deploy:
+    name: Build, Push & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      # -- 1. Checkout -------------------------------------------------------
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # -- 2. Authenticate to GCP via Workload Identity Federation -----------
+      #    GitHub OIDC token -> short-lived GCP access token.
+      #    No JSON key stored in GitHub secrets.
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: >-
+            projects/${{ env.PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: schrody-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+
+      # -- 3. Set up gcloud CLI and Docker credential helper ----------------
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # -- 4. Build & push (SHA tag for rollbacks + latest for quick lookup) -
+      - name: Build and push Docker image
+        id: build
+        run: |
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ env.IMAGE }}"
+
+          docker build \
+            -t "${IMAGE_URI}:${SHORT_SHA}" \
+            -t "${IMAGE_URI}:latest" \
+            .
+
+          docker push "${IMAGE_URI}:${SHORT_SHA}"
+          docker push "${IMAGE_URI}:latest"
+
+          # Export for later steps
+          echo "short_sha=${SHORT_SHA}"  >> "$GITHUB_OUTPUT"
+          echo "image_uri=${IMAGE_URI}"  >> "$GITHUB_OUTPUT"
+
+      # -- 5. Get GKE cluster credentials -----------------------------------
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location:     ${{ env.REGION }}
+          project_id:   ${{ env.PROJECT_ID }}
+
+      # -- 6. Sync Secret Manager -> Kubernetes Secret ----------------------
+      #    Rotating a secret in Secret Manager takes effect automatically on
+      #    the next deploy because this step runs every time.
+      - name: Sync secrets from Secret Manager
+        run: bash scripts/sync-secrets.sh
+
+      # -- 7. Pin the exact SHA tag and apply all manifests -----------------
+      #    `kustomize edit set image` updates kustomization.yaml in the CI
+      #    workspace (it is NOT committed back -- the next run will re-pin).
+      #    This ensures the deployment always runs the image just pushed,
+      #    not whatever `latest` resolves to.
+      - name: Deploy to GKE
+        run: |
+          SHORT_SHA="${{ steps.build.outputs.short_sha }}"
+          IMAGE_URI="${{ steps.build.outputs.image_uri }}"
+
+          cd k8s
+          kustomize edit set image "${IMAGE_URI}:${SHORT_SHA}"
+          cd ..
+
+          kubectl apply -k k8s/
+
+      # -- 8. Block until rollout completes (or fail loudly) ----------------
+      #    With strategy: Recreate the old pod fully terminates before the
+      #    new one starts, so 300s is generous even for a cold image pull.
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/schrody-bot \
+            --namespace=${{ env.NAMESPACE }} \
+            --timeout=300s

@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schrody-bot
+  namespace: schrody-bot
+  labels:
+    app: schrody-bot
+spec:
+  # A Discord gateway connection is stateful per-process. Running more than one
+  # replica means two processes racing to handle the same commands/events, and
+  # duplicate slash-command syncs. Keep this at 1 and scale the bot's *work*
+  # (e.g. background tasks) inside the process instead of via replicas.
+  replicas: 1
+  strategy:
+    # Recreate (not RollingUpdate): make sure the old pod fully disconnects from
+    # the Discord gateway before the new one connects, so you never have two
+    # instances online at once during a deploy.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: schrody-bot
+  template:
+    metadata:
+      labels:
+        app: schrody-bot
+    spec:
+      containers:
+        - name: schrody-bot
+          # CI/CD replaces this tag on every deploy (see .github/workflows/ci-cd.yaml)
+          image: us-central1-docker.pkg.dev/schrodybot/schrody-bot-repo/schrody-discord-bot:latest
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: schrody-bot-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          # No HTTP server exists in this bot, so we use process-based probes.
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "bot.py"]
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+          startupProbe:
+            exec:
+              command: ["pgrep", "-f", "bot.py"]
+            failureThreshold: 10
+            periodSeconds: 5
+      restartPolicy: Always
+---
+# Not required for outbound-only traffic, but gives you a stable object to attach
+# a metrics/health endpoint to later if you add one.
+apiVersion: v1
+kind: Service
+metadata:
+  name: schrody-bot
+  namespace: schrody-bot
+spec:
+  selector:
+    app: schrody-bot
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: ClusterIP
