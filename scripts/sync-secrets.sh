@@ -24,8 +24,12 @@ declare -A SECRETS=(
 ARGS=()
 for secret_id in "${!SECRETS[@]}"; do
   env_name="${SECRETS[$secret_id]}"
-  value="$(gcloud secrets versions access latest --secret="${secret_id}")"
-  ARGS+=("--from-literal=${env_name}=${value}")
+  if value="$(gcloud secrets versions access latest --secret="${secret_id}" 2>/dev/null)"; then
+    ARGS+=("--from-literal=${env_name}=${value}")
+    echo "  Synced secret: ${secret_id} -> ${env_name}"
+  else
+    echo "  ⚠️ Warning: Secret '${secret_id}' not found in Secret Manager, skipping."
+  fi
 done
 
 kubectl create secret generic "${SECRET_NAME}" \
