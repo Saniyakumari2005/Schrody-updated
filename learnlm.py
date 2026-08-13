@@ -5,9 +5,7 @@ from dotenv import load_dotenv
 from typing import Optional, List, Dict, Union
 import db
 
-# Load API keys
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+from config import GEMINI_MODEL, GEMINI_API_KEY
 
 if not GEMINI_API_KEY:
     raise Exception("Missing GEMINI_API_KEY. Please add it to your .env file.")
@@ -242,19 +240,19 @@ class LearnLMTutor:
     DEFAULT_SUMMARY_CONTEXT = 3  # exchanges for smart summary mode
     MAX_CONTEXT_TOKENS = 4000  # rough token limit for context
 
-    def __init__(self, model_name: str = 'gemini-2.5-flash', session_id: Optional[str] = None, 
+    def __init__(self, model_name: Optional[str] = None, session_id: Optional[str] = None, 
                  active_context_limit: int = None, storage_dir: str = "sessions"):
         """
         Initialize the tutor with enhanced context management.
 
         Args:
-            model_name: Gemini model to use
+            model_name: Gemini model to use (defaults to GEMINI_MODEL)
             session_id: Unique session identifier for persistence
             active_context_limit: Number of recent exchanges to keep in active context
             storage_dir: Directory to store session files
         """
-        self.model_name = model_name
-        self.model = genai.GenerativeModel(model_name)
+        self.model_name = model_name or GEMINI_MODEL
+        self.model = genai.GenerativeModel(self.model_name)
         self.session_id = session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.active_context_limit = active_context_limit or self.DEFAULT_ACTIVE_CONTEXT
 
@@ -302,13 +300,13 @@ class LearnLMTutor:
         context_lines = []
         current_tokens = 0
         for entry in reversed(self.conversation_history):
-           entry_text = f"Student: {entry['question']}\nTutor: {entry['answer']}\n\n"
-           entry_tokens = self._estimate_token_count(entry_text)
-           if current_tokens + entry_tokens > self.MAX_CONTEXT_TOKENS:
-               context_lines.append("[Earlier conversation truncated due to length...]\n\n")
-               break
-           context_lines.append(entry_text)
-           current_tokens += entry_tokens
+            entry_text = f"Student: {entry['question']}\nTutor: {entry['answer']}\n\n"
+            entry_tokens = self._estimate_token_count(entry_text)
+            if current_tokens + entry_tokens > self.MAX_CONTEXT_TOKENS:
+                context_lines.append("[Earlier conversation truncated due to length...]\n\n")
+                break
+            context_lines.append(entry_text)
+            current_tokens += entry_tokens
 
         context = f"Full conversation history ({len(self.conversation_history)} exchanges):\n"
         context += "".join(reversed(context_lines))
@@ -537,5 +535,3 @@ class LearnLMTutor:
         summary += f"• Top topics: {', '.join([topic[0] for topic in top_topics])}\n"
 
         return summary
-
-    
