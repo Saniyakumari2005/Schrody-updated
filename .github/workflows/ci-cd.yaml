@@ -1,17 +1,4 @@
-# .github/workflows/ci-cd.yaml
-# Builds the Docker image, pushes to Artifact Registry, and deploys to GKE
-# on every push to main.
-#
-# Authentication uses Workload Identity Federation -- no long-lived JSON keys
-# are stored in GitHub. GitHub's OIDC token is exchanged for a short-lived
-# GCP token at run time.
-#
-# Pre-requisites (one-time manual setup -- see the deployment guide):
-#   - Artifact Registry repo:  schrody-bot-repo  (us-central1)
-#   - GKE Autopilot cluster:   schrody-cluster   (us-central1)
-#   - WIF pool/provider:       github-pool / github-provider
-#   - Service account:         schrody-deployer@gen-lang-client-0745839265.iam.gserviceaccount.com
-#   - Secrets in Secret Manager (see guide step 4)
+
 
 name: CI/CD -- Build & Deploy to GKE
 
